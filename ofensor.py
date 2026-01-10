@@ -66,7 +66,7 @@ def processar_dados():
         disciplina_status = pending_pb_reply['Petrobras Discipline'].value_counts().to_dict()
 
         # 4. Pending Operation Reply
-        mask_op_reply = (df['Petrobras Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
+        mask_op_reply = (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
                         (df['Petrobras Operation accept closing? (Y/N)'].isna())
         df_pending_op = df[mask_op_reply].copy()
         count_pending_op_reply = len(df_pending_op)
@@ -92,10 +92,10 @@ def processar_dados():
         count_esup_indep_op = count_esup_overdue - count_esup_dep_op
 
         # 8. Grupos de Avaliação
-        mask_op_group = df['Petrobras Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])
+        mask_op_group = df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])
         resp_op_group = len(df[mask_op_group & df['Date Cleared by Petrobras Operation'].notna()])
 
-        mask_eng_group = df['Petrobras Punched by (Group)'] == 'PB - Engineering'
+        mask_eng_group = df['Punched by  (Group)'] == 'PB - Engineering'
         resp_eng_by_op = len(df[mask_eng_group & df['Date Cleared by Petrobras Operation'].notna()])
 
         # 9. Mapeamento de RDs para Menção (@)
