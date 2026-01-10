@@ -9,6 +9,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
+from webdriver_manager.core.http import WDMHttpClient
 import win32com.client as win32
 
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
@@ -66,7 +67,8 @@ def processar_dados():
         disciplina_status = pending_pb_reply['Petrobras Discipline'].value_counts().to_dict()
 
         # 4. Pending Operation Reply
-        mask_op_reply = (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
+        mask_op_reply = (df['Status'].str.strip() == 'Pending PB Reply') & \
+                        (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
                         (df['Petrobras Operation accept closing? (Y/N)'].isna())
         df_pending_op = df[mask_op_reply].copy()
         count_pending_op_reply = len(df_pending_op)
@@ -143,7 +145,12 @@ def capturar_power_bi_web():
         options.add_argument("--no-sandbox")
 
         # O webdriver-manager baixa e gerencia o chromedriver automaticamente
-        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+        # Desabilitar a verificação SSL é necessário em algumas redes corporativas
+        wdm_http_client = WDMHttpClient(ssl_verify=False)
+        driver = webdriver.Chrome(
+            service=ChromeService(ChromeDriverManager(http_client=wdm_http_client).install()),
+            options=options
+        )
 
         log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Acessando a URL do Power BI...")
         driver.get(URL_PBI)
