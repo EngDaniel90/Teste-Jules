@@ -11,6 +11,12 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.http import WDMHttpClient
 import win32com.client as win32
+import ssl
+
+# Desabilita a verificação de certificado SSL globalmente para este script
+# Esta é uma solução robusta para o erro 'CERTIFICATE_VERIFY_FAILED' em redes corporativas
+ssl._create_default_https_context = ssl._create_unverified_context
+
 
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
 PATH_PUNCH = r'C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx'
@@ -145,12 +151,7 @@ def capturar_power_bi_web():
         options.add_argument("--no-sandbox")
 
         # O webdriver-manager baixa e gerencia o chromedriver automaticamente
-        # Desabilitar a verificação SSL é necessário em algumas redes corporativas
-        wdm_http_client = WDMHttpClient(ssl_verify=False)
-        driver = webdriver.Chrome(
-            service=ChromeService(ChromeDriverManager(http_client=wdm_http_client).install()),
-            options=options
-        )
+        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
 
         log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Acessando a URL do Power BI...")
         driver.get(URL_PBI)
