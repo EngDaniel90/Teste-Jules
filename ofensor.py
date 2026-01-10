@@ -3,45 +3,16 @@ import os
 import time
 import traceback
 from datetime import datetime
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
-from webdriver_manager.core.http import WDMHttpClient
 import win32com.client as win32
-import ssl
-
-# Desabilita a verificação de certificado SSL globalmente para este script
-# Esta é uma solução robusta para o erro 'CERTIFICATE_VERIFY_FAILED' em redes corporativas
-ssl._create_default_https_context = ssl._create_unverified_context
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
 PATH_PUNCH = r'C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx'
 PATH_RDS = r'C:\Users\E797\Downloads\Teste mensagem e print\RDs\RDs.xlsx'
-PATH_SCREENSHOT = r'C:\Users\E797\Downloads\Teste mensagem e print\screenshot_pbi.png'
-URL_PBI = "https://app.powerbi.com/groups/me/apps/19dbdcff-e619-4505-a1be-b99673c7d0c0/reports/e668a8c0-fc8a-48d2-96e9-4fcc014221f4/1fe6836411ece2219e39?ctid=5b6f6241-9a57-4be4-8e50-1dfa72e79a57&experience=power-bi"
+PATH_SCREENSHOT = r'C:\Users\E797\Downloads\Teste mensagem e print\dashboard_status.png'
 EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
-
-# --- CONFIGURAÇÕES DE LOGIN (IMPORTANTE) ---
-# Para evitar riscos de segurança, as credenciais do Power BI não devem ser escritas
-# diretamente neste código. Elas devem ser configuradas como variáveis de ambiente no
-# sistema onde o script será executado.
-#
-# Como configurar as variáveis de ambiente:
-# 1. Abra o menu Iniciar e pesquise por "Editar as variáveis de ambiente do sistema".
-# 2. Na janela de "Propriedades do Sistema", clique em "Variáveis de Ambiente...".
-# 3. Em "Variáveis de usuário", clique em "Novo..." e crie duas variáveis:
-#    - Nome da variável: POWERBI_USER
-#      Valor da variável: seu_email@petrobras.com.br
-#    - Nome da variável: POWERBI_PASSWORD
-#      Valor da variável: sua_senha
-# 4. Reinicie o PyCharm ou o terminal para que as novas variáveis sejam carregadas.
-
-POWERBI_USER = os.getenv("POWERBI_USER")
-POWERBI_PASSWORD = os.getenv("POWERBI_PASSWORD")
 
 
 def processar_dados():
@@ -117,6 +88,7 @@ def processar_dados():
                     mencoes_rds.append(f"@{nome}")
 
         resultados = {
+            "total_punches": len(df),
             "status_counts": status_counts,
             "disciplina_status": disciplina_status,
             "pending_op_reply": count_pending_op_reply,
@@ -138,71 +110,68 @@ def processar_dados():
         return None, log, False
 
 
-def capturar_power_bi_web():
+def gerar_dashboard_imagem(dados):
     """
-    Abre o Power BI no navegador em modo headless, faz o login e tira um screenshot.
+    Gera uma imagem de dashboard com os principais indicadores usando Matplotlib e Seaborn.
     """
     log = []
     try:
-        options = webdriver.ChromeOptions()
-        options.add_argument("--headless")
-        options.add_argument("--window-size=1920,1080")  # Resolução da captura
-        options.add_argument("--disable-gpu")
-        options.add_argument("--no-sandbox")
+        total_punches = dados['total_punches']
+        pending_reply = dados['status_counts'].get('Pending PB Reply', 0)
+        disciplinas = dados['disciplina_status']
 
-        # O webdriver-manager baixa e gerencia o chromedriver automaticamente
-        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+        # --- Configurações Visuais ---
+        sns.set_style("whitegrid")
+        plt.rcParams['font.family'] = 'sans-serif'
+        plt.rcParams['font.sans-serif'] = 'Calibri'
 
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Acessando a URL do Power BI...")
-        driver.get(URL_PBI)
+        # Cor corporativa (ex: um azul escuro) e cor de destaque
+        cor_principal = "#004488"
+        cor_destaque = "#ff8c00"
 
-        # --- LÓGICA DE LOGIN ---
-        # AVISO: Esta automação pode falhar se a Autenticação de Múltiplos Fatores (MFA)
-        # estiver habilitada na conta, pois exigirá uma interação manual não prevista no script.
+        # --- Criação da Figura e dos Eixos (subplots) ---
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 2]})
+        fig.suptitle('Status Report - Design Review TS', fontsize=24, fontweight='bold', color=cor_principal)
 
-        wait = WebDriverWait(driver, 45) # Tempo de espera aumentado
+        # --- Gráfico 1: Barras Verticais (Total vs. Pendente) ---
+        ax1.set_title('Visão Geral dos Itens', fontsize=16, fontweight='bold')
+        sns.barplot(x=['Total de Itens', 'Pendentes (PB)'], y=[total_punches, pending_reply],
+                    palette=[cor_principal, cor_destaque], ax=ax1, width=0.5)
+        ax1.set_ylabel('Quantidade', fontsize=12)
+        ax1.grid(axis='y', linestyle='--', alpha=0.7)
 
-        # Insere o e-mail (usando um seletor mais estável)
-        email_field = wait.until(EC.presence_of_element_located((By.NAME, "loginfmt")))
-        email_field.send_keys(POWERBI_USER)
-        driver.find_element(By.ID, "idSIButton9").click()
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail inserido.")
+        # Adiciona rótulos de dados nas barras
+        for p in ax1.patches:
+            ax1.annotate(f'{int(p.get_height())}',
+                         (p.get_x() + p.get_width() / 2., p.get_height()),
+                         ha='center', va='center', fontsize=14, color='black', xytext=(0, 10),
+                         textcoords='offset points')
 
-        # Insere a senha (usando um seletor mais estável)
-        password_field = wait.until(EC.presence_of_element_located((By.NAME, "passwd")))
-        password_field.send_keys(POWERBI_PASSWORD)
-        driver.find_element(By.ID, "idSIButton9").click()
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Senha inserida.")
+        # --- Gráfico 2: Barras Horizontais (Pendências por Disciplina) ---
+        disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
+        nomes_disciplinas = [item[0] for item in disciplinas_sorted]
+        valores_disciplinas = [item[1] for item in disciplinas_sorted]
 
-        # Lida com a tela "Permanecer conectado"
-        try:
-            stay_signed_in_button = wait.until(EC.element_to_be_clickable((By.ID, "idSIButton9")))
-            stay_signed_in_button.click()
-            log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Clicado em 'Permanecer conectado'.")
-        except:
-            log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Tela 'Permanecer conectado' não apareceu, seguindo.")
-            pass
+        ax2.set_title('Pendências por Disciplina', fontsize=16, fontweight='bold')
+        sns.barplot(x=valores_disciplinas, y=nomes_disciplinas, palette="viridis", ax=ax2, orient='h')
+        ax2.set_xlabel('Quantidade de Itens Pendentes', fontsize=12)
+        ax2.grid(axis='x', linestyle='--', alpha=0.7)
 
-        # Aguarda o carregamento do relatório de forma robusta
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Aguardando o relatório carregar...")
-        wait.until(EC.visibility_of_element_located((By.CLASS_NAME, "report-canvas")))
-        wait.until(EC.presence_of_element_located((By.CLASS_NAME, "visual-container-component")))
+        # Adiciona rótulos de dados nas barras
+        for index, value in enumerate(valores_disciplinas):
+            ax2.text(value, index, f' {value}', va='center', fontsize=12, color='black')
 
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Relatório carregado, aguardando renderização final...")
-        time.sleep(5) # Pausa curta para garantir que os elementos visuais terminem de renderizar
+        # --- Finalização e Salvamento ---
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95]) # Ajusta o layout para o título principal caber
+        plt.savefig(PATH_SCREENSHOT, dpi=200, bbox_inches='tight')
+        plt.close()
 
-        # Captura de tela
-        driver.save_screenshot(PATH_SCREENSHOT)
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Screenshot capturado com sucesso.")
-
-        driver.quit()
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dashboard gerado com sucesso.")
         return True, log
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
-        log.append(f"ERRO CRÍTICO na captura do Power BI: {str(e)}\n{erro_detalhado}")
-        if 'driver' in locals():
-            driver.quit()
+        log.append(f"ERRO CRÍTICO ao gerar dashboard: {str(e)}\n{erro_detalhado}")
         return False, log
 
 
@@ -316,14 +285,15 @@ if __name__ == "__main__":
     if sucesso_proc:
         print("Dados da planilha processados com sucesso.")
 
-        # Etapa 2: Captura de Tela do Power BI
-        sucesso_screenshot, log_screenshot = capturar_power_bi_web()
-        log_total = log_proc + log_screenshot
+        # Etapa 2: Geração da Imagem do Dashboard
+        sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_finais)
+        log_total = log_proc + log_dashboard
 
-        if sucesso_screenshot:
-            print("Captura de tela do Power BI realizada com sucesso.")
+        if sucesso_dashboard:
+            print("Dashboard gerado com sucesso.")
         else:
-            print("!!! FALHA NA CAPTURA DE TELA DO POWER BI !!!")
+            print("!!! FALHA NA GERAÇÃO DO DASHBOARD !!!")
+            # Mesmo com falha no dashboard, o e-mail com os dados da tabela ainda é enviado.
 
         # Etapa 3: Envio de E-mails
         print("Enviando e-mails...")

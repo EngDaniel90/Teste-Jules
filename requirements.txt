@@ -1,5 +1,5 @@
 pandas
-selenium
-webdriver-manager
 pywin32
 openpyxl
+matplotlib
+seaborn
