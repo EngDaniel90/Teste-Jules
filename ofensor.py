@@ -13,7 +13,7 @@ import win32com.client as win32
 
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
 PATH_PUNCH = r'C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx'
-PATH_RDS = r'C:\Users\E797\Downloads\Teste mensagem e print\RDs.xlsx'
+PATH_RDS = r'C:\Users\E797\Downloads\Teste mensagem e print\RDs\RDs.xlsx'
 PATH_SCREENSHOT = r'C:\Users\E797\Downloads\Teste mensagem e print\screenshot_pbi.png'
 URL_PBI = "https://app.powerbi.com/groups/me/apps/19dbdcff-e619-4505-a1be-b99673c7d0c0/reports/e668a8c0-fc8a-48d2-96e9-4fcc014221f4/1fe6836411ece2219e39?ctid=5b6f6241-9a57-4be4-8e50-1dfa72e79a57&experience=power-bi"
 EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
