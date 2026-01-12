@@ -664,69 +664,113 @@ def enviar_mensagem_julius(dados):
 
 # --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
-    print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
-    hora_atual = datetime.now().hour
+    now = datetime.now()
+    print(f"--- INICIANDO VERIFICACAO DE AGENDAMENTO ({now.strftime('%d/%m/%Y %H:%M:%S')}) ---")
 
-    # --- FLUXO 1: Relatório Principal (Topside) ---
-    print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
-    dados_topside, log_topside, sucesso_topside = processar_dados()
-    if sucesso_topside:
-        print("-> Dados Topside processados com sucesso.")
-        sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
-        log_total_topside = log_topside + log_dashboard
-        if sucesso_dashboard: print("-> Dashboard Topside gerado com sucesso.")
-        else: print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
-        enviar_email(dados_topside, log_total_topside)
+    # Define os horários de envio de relatório (aproximados)
+    hora_atual = now.hour
+    minuto_atual = now.minute
+
+    # Horários: 8h (7:45-8:15), 12h (11:45-12:15), 16h30 (16:15-16:45)
+    is_report_time = (7 <= hora_atual < 9) or \
+                     (11 <= hora_atual < 13) or \
+                     (16 <= hora_atual < 17 and minuto_atual >= 15)
+
+    if not is_report_time:
+        print("-> Fora do horário de envio de relatórios. Encerrando execução.")
     else:
-        print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
-        enviar_email_de_falha(log_topside)
+        print(f"-> Horário de relatório detectado. Iniciando geração e envio...")
 
-    # --- FLUXO 2: E-mail para Julius ---
-    print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
-    if 7 <= hora_atual < 9:
+        # --- FLUXO 1: Relatório Principal (Topside) ---
+        print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
+        dados_topside, log_topside, sucesso_topside = processar_dados()
         if sucesso_topside:
-            enviar_mensagem_julius(dados_topside)
+            print("-> Dados Topside processados com sucesso.")
+            sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
+            log_total_topside = log_topside + log_dashboard
+            if sucesso_dashboard: print("-> Dashboard Topside gerado com sucesso.")
+            else: print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
+            enviar_email(dados_topside, log_total_topside)
         else:
-            print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
-    else:
-        print(f"-> Fora do horário agendado (executado às {hora_atual}h). E-mail para Julius não enviado.")
+            print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
+            enviar_email_de_falha(log_topside)
 
-    # --- FLUXO 3: Relatório E-House ---
-    print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
-    try:
-        dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
-        if sucesso_ehouse:
-            print("-> Dados E-House processados com sucesso.")
-            sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados_ehouse)
-            if sucesso_grafico:
-                print("-> Gráfico E-House gerado com sucesso.")
-                enviar_email_ehouse(dados_ehouse)
+        # --- FLUXO 2: E-mail para Julius ---
+        print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
+        if 7 <= hora_atual < 9:
+            if sucesso_topside:
+                enviar_mensagem_julius(dados_topside)
             else:
-                print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO E-HOUSE !!!")
-                enviar_email_de_falha(log_ehouse + log_grafico)
-    except FileNotFoundError as e:
-        print(f"-> Arquivo E-House não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
-    except Exception as e:
-        print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE: {e} !!!")
-        enviar_email_de_falha([str(e)])
+                print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
+        else:
+            print("-> Fora do horário do relatório do Julius.")
 
-    # --- FLUXO 4: Relatório Vendors ---
-    print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
-    try:
-        dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
-        if sucesso_vendors:
-            print("-> Dados de Vendors processados com sucesso.")
-            sucesso_grafico, log_grafico = gerar_dashboard_vendors(dados_vendors)
-            if sucesso_grafico:
-                print("-> Dashboard de Vendors gerado com sucesso.")
-                enviar_email_vendors(dados_vendors)
-            else:
-                print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE VENDORS !!!")
-                enviar_email_de_falha(log_vendors + log_grafico)
-    except FileNotFoundError as e:
-        print(f"-> Arquivo de Vendors não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
-    except Exception as e:
-        print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE VENDORS: {e} !!!")
-        enviar_email_de_falha([str(e)])
+        # --- FLUXO 3: Relatório E-House ---
+        print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
+        try:
+            dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
+            if sucesso_ehouse:
+                print("-> Dados E-House processados com sucesso.")
+                sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados_ehouse)
+                if sucesso_grafico:
+                    print("-> Gráfico E-House gerado com sucesso.")
+                    enviar_email_ehouse(dados_ehouse)
+                else:
+                    print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO E-HOUSE !!!")
+                    enviar_email_de_falha(log_ehouse + log_grafico)
+        except FileNotFoundError as e:
+            print(f"-> Arquivo E-House não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
+        except Exception as e:
+            print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE: {e} !!!")
+            enviar_email_de_falha([str(e)])
+
+        # --- FLUXO 4: Relatório Vendors ---
+        print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
+        try:
+            dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
+            if sucesso_vendors:
+                print("-> Dados de Vendors processados com sucesso.")
+                sucesso_grafico, log_grafico = gerar_dashboard_vendors(dados_vendors)
+                if sucesso_grafico:
+                    print("-> Dashboard de Vendors gerado com sucesso.")
+                    enviar_email_vendors(dados_vendors)
+                else:
+                    print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE VENDORS !!!")
+                    enviar_email_de_falha(log_vendors + log_grafico)
+        except FileNotFoundError as e:
+            print(f"-> Arquivo de Vendors não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
+        except Exception as e:
+            print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE VENDORS: {e} !!!")
+            enviar_email_de_falha([str(e)])
 
     print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
+
+
+# --- COMO AGENDAR A EXECUÇÃO AUTOMÁTICA (WINDOWS) ---
+"""
+A automação completa depende de agendar a execução do arquivo `run_automation.bat`.
+Você deve criar DUAS tarefas separadas no Agendador de Tarefas do Windows.
+
+TAREFA 1: ATUALIZAÇÃO DE DADOS (A CADA 15 MINUTOS)
+- Objetivo: Apenas baixar as planilhas do SharePoint. O script `ofensor.py` não enviará e-mails.
+- Ação:
+    - Programa/script: `C:\...caminho_completo_para...\run_automation.bat`
+    - Iniciar em: `C:\...caminho_completo_para_a_pasta_do_projeto...`
+- Disparador:
+    - Iniciar em um horário (ex: 07:00).
+    - Repetir a tarefa a cada: `15 minutos`.
+    - Por um período de: `Indefinidamente`.
+
+TAREFA 2: ENVIO DE RELATÓRIOS (3 VEZES AO DIA)
+- Objetivo: Baixar os dados mais recentes E enviar os e-mails de relatório.
+- Ação:
+    - Programa/script: `C:\...caminho_completo_para...\run_automation.bat`
+    - Iniciar em: `C:\...caminho_completo_para_a_pasta_do_projeto...`
+- Disparadores:
+    - Crie um disparador diário para as `08:00`.
+    - Crie outro para as `12:00`.
+    - Crie um terceiro para as `16:30`.
+
+Lembre-se de, nas "Condições" da tarefa, desmarcar a opção de energia para garantir que ela
+seja executada mesmo que o computador esteja na bateria.
+"""
