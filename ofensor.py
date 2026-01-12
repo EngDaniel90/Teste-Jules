@@ -13,8 +13,38 @@ PATH_DASHBOARD_IMG = r'C:\Users\E797\Downloads\Teste mensagem e print\dashboard_
 PATH_OP_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\Operation to check.xlsx'
 PATH_ESUP_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\ESUP to check.xlsx'
 PATH_JULIUS_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\Julius to check.xlsx'
+PATH_EHOUSE_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_E-House.xlsx"
+PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
 EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
+
+
+def processar_dados_ehouse():
+    """
+    Processa os dados da planilha E-House para o relatório específico.
+    """
+    log = []
+    try:
+        if not os.path.exists(PATH_EHOUSE_PUNCH):
+            raise FileNotFoundError(f"Arquivo E-House não encontrado: {PATH_EHOUSE_PUNCH}")
+
+        df_ehouse = pd.read_excel(PATH_EHOUSE_PUNCH)
+        df_ehouse.columns = df_ehouse.columns.str.strip()
+
+        pending_petrobras = df_ehouse[df_ehouse['Status'].str.strip() == 'Pending Petrobras'].copy()
+        disciplina_counts = pending_petrobras['Petrobras Discipline'].value_counts().to_dict()
+
+        resultados = {
+            "total_pending": len(pending_petrobras),
+            "disciplina_counts": disciplina_counts
+        }
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processamento de dados E-House concluído.")
+        return resultados, log, True
+
+    except Exception as e:
+        erro_detalhado = traceback.format_exc()
+        log.append(f"ERRO CRÍTICO no processamento de dados E-House: {str(e)}\n{erro_detalhado}")
+        return None, log, False
 
 
 def processar_dados():
@@ -210,6 +240,111 @@ def gerar_dashboard_imagem(dados):
         return False, log
 
 
+def gerar_grafico_ehouse(dados):
+    """
+    Gera um gráfico de barras vertical para o status de E-House.
+    """
+    log = []
+    try:
+        disciplinas = dados['disciplina_counts']
+        if not disciplinas:
+            log.append("Nenhum dado de E-House para gerar gráfico.")
+            return True, log # Não é um erro, apenas não há o que fazer
+
+        sns.set_style("whitegrid")
+        plt.rcParams['font.family'] = 'sans-serif'
+        plt.rcParams['font.sans-serif'] = 'Calibri'
+
+        cor_principal = "#0072B2" # Um azul diferente para distinguir
+
+        plt.figure(figsize=(12, 8))
+
+        disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
+        nomes_disciplinas = [item[0] for item in disciplinas_sorted]
+        valores_disciplinas = [item[1] for item in disciplinas_sorted]
+
+        ax = sns.barplot(x=nomes_disciplinas, y=valores_disciplinas, palette="Blues_r")
+
+        ax.set_title('Status Punch E-House: Pendentes Petrobras por Disciplina', fontsize=18, fontweight='bold')
+        ax.set_xlabel('Disciplina', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Quantidade de Itens', fontsize=12, fontweight='bold')
+        plt.xticks(rotation=45, ha='right')
+
+        for p in ax.patches:
+            ax.annotate(f'{int(p.get_height())}',
+                         (p.get_x() + p.get_width() / 2., p.get_height()),
+                         ha='center', va='center', fontsize=11, color='black', xytext=(0, 5),
+                         textcoords='offset points')
+
+        plt.tight_layout()
+        plt.savefig(PATH_EHOUSE_GRAPH, dpi=200, bbox_inches='tight')
+        plt.close()
+
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico E-House gerado com sucesso.")
+        return True, log
+
+    except Exception as e:
+        erro_detalhado = traceback.format_exc()
+        log.append(f"ERRO CRÍTICO ao gerar gráfico E-House: {str(e)}\n{erro_detalhado}")
+        return False, log
+
+
+def enviar_email_ehouse(dados):
+    """
+    Envia um e-mail de status específico para a punch list E-House.
+    """
+    if dados is None or dados.get("total_pending", 0) == 0:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Nenhum item 'Pending Petrobras' no E-House. E-mail não enviado.")
+        return
+
+    try:
+        outlook = win32.Dispatch('outlook.application')
+        mail = outlook.CreateItem(0)
+        mail.Importance = 2
+        mail.To = EMAIL_DESTINO
+        mail.Subject = f"Status Report: Punch List DR90 E-House - {datetime.now().strftime('%d/%m/%Y')}"
+
+        disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
+
+        mail.HTMLBody = f"""
+        <html lang="pt-BR">
+        <head>
+            <style>
+                body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
+                p {{ margin: 10px 0; }}
+                .highlight {{ color: #c00000; font-weight: bold; }}
+                .mention {{ font-weight: bold; color: #005a9e; }}
+            </style>
+        </head>
+        <body>
+            <p class="highlight">[MENSAGEM AUTOMÁTICA IMPORTANTE]</p>
+            <p class="mention">@Acompanhamento Design Review TS</p>
+            <p>Prezados,</p>
+            <p>Segue a atualização de status da <b>Punch List E-House</b>:</p>
+
+            <p>Atualmente, temos <span class="highlight">{dados['total_pending']}</span> itens com status <b>Pending Petrobras</b>.</p>
+
+            <p><b>Detalhamento por Disciplina:</b></p>
+            <ul>{disciplinas_html}</ul>
+
+            <p><i>O gráfico de status está anexado a este e-mail.</i></p>
+            <p>Atenciosamente,</p>
+            <p><b>Automação de Relatórios DR90 E-House</b></p>
+        </body>
+        </html>
+        """
+
+        if os.path.exists(PATH_EHOUSE_GRAPH):
+            mail.Attachments.Add(PATH_EHOUSE_GRAPH)
+
+        mail.Send()
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de status E-House enviado com sucesso.")
+
+    except Exception as e:
+        erro_detalhado = traceback.format_exc()
+        print(f"ERRO CRÍTICO ao enviar e-mail de E-House: {str(e)}\n{erro_detalhado}")
+
+
 def enviar_email(dados, log_processo):
     """
     Cria e envia um e-mail formatado com os dados do relatório e o log de execução.
@@ -384,35 +519,55 @@ def enviar_mensagem_julius(dados):
 
 # --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
-    print("--- INICIANDO PROCESSO DE AUTOMAÇÃO ---")
-
+    print("--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ---")
     hora_atual = datetime.now().hour
 
-    dados_finais, log_proc, sucesso_proc = processar_dados()
+    # --- FLUXO 1: Relatório Principal (Topside) ---
+    print("\n--- Processando Relatório Principal (Topside) ---")
+    dados_topside, log_topside, sucesso_topside = processar_dados()
 
-    if sucesso_proc:
-        print("Dados da planilha processados com sucesso.")
-
-        sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_finais)
-        log_total = log_proc + log_dashboard
+    if sucesso_topside:
+        print("Dados Topside processados com sucesso.")
+        sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
+        log_total_topside = log_topside + log_dashboard
 
         if sucesso_dashboard:
-            print("Dashboard gerado com sucesso.")
+            print("Dashboard Topside gerado com sucesso.")
         else:
-            print("!!! FALHA NA GERAÇÃO DO DASHBOARD !!!")
+            print("!!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
 
-        print("Enviando e-mail principal...")
-        enviar_email(dados_finais, log_total)
+        print("Enviando e-mail do relatório principal...")
+        enviar_email(dados_topside, log_total_topside)
 
         if 7 <= hora_atual < 9:
-            print("Horário de enviar e-mail para Julius. Verificando itens...")
-            enviar_mensagem_julius(dados_finais)
-
+            print("Verificando itens para Julius...")
+            enviar_mensagem_julius(dados_topside)
     else:
-        print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS !!!")
-        enviar_email_de_falha(log_proc)
+        print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
+        enviar_email_de_falha(log_topside)
 
-    print("--- PROCESSO FINALIZADO ---")
+    # --- FLUXO 2: Relatório E-House ---
+    print("\n--- Processando Relatório E-House ---")
+    dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
+
+    if sucesso_ehouse:
+        print("Dados E-House processados com sucesso.")
+        sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados_ehouse)
+
+        if sucesso_grafico:
+            print("Gráfico E-House gerado com sucesso.")
+            enviar_email_ehouse(dados_ehouse)
+        else:
+            print("!!! FALHA NA GERAÇÃO DO GRÁFICO E-HOUSE !!!")
+            # Envia e-mail de falha específico para o fluxo E-House se o gráfico falhar
+            enviar_email_de_falha(log_ehouse + log_grafico)
+    else:
+        # Não envia e-mail de falha se o arquivo não for encontrado, pois pode não estar disponível sempre.
+        if "Arquivo E-House não encontrado" not in log_ehouse[0]:
+             print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE !!!")
+             enviar_email_de_falha(log_ehouse)
+
+    print("\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ---")
 
 # --- COMO AGENDAR A EXECUÇÃO AUTOMÁTICA (WINDOWS) ---
 """
