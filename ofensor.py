@@ -15,6 +15,8 @@ PATH_ESUP_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\ESUP to check
 PATH_JULIUS_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\Julius to check.xlsx'
 PATH_EHOUSE_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_E-House.xlsx"
 PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
+PATH_VENDORS_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_Vendors.xlsx"
+PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
 EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
 
@@ -44,6 +46,35 @@ def processar_dados_ehouse():
     except Exception as e:
         erro_detalhado = traceback.format_exc()
         log.append(f"ERRO CRÍTICO no processamento de dados E-House: {str(e)}\n{erro_detalhado}")
+        return None, log, False
+
+
+def processar_dados_vendors():
+    """
+    Processa os dados da planilha de Vendors para o relatório específico.
+    """
+    log = []
+    try:
+        if not os.path.exists(PATH_VENDORS_PUNCH):
+            raise FileNotFoundError(f"Arquivo Vendors não encontrado: {PATH_VENDORS_PUNCH}")
+
+        df_vendors = pd.read_excel(PATH_VENDORS_PUNCH)
+        df_vendors.columns = df_vendors.columns.str.strip()
+
+        pending_petrobras = df_vendors[df_vendors['Status'].str.strip() == 'Pending Petrobras'].copy()
+        disciplina_counts = pending_petrobras['Petrobras Discipline'].value_counts().to_dict()
+
+        resultados = {
+            "total_pending": len(pending_petrobras),
+            "disciplina_counts": disciplina_counts,
+            "total_punches": len(df_vendors)
+        }
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processamento de dados de Vendors concluído.")
+        return resultados, log, True
+
+    except Exception as e:
+        erro_detalhado = traceback.format_exc()
+        log.append(f"ERRO CRÍTICO no processamento de dados de Vendors: {str(e)}\n{erro_detalhado}")
         return None, log, False
 
 
@@ -198,7 +229,7 @@ def gerar_dashboard_imagem(dados):
         # --- Gráfico 1: Barras Verticais (Total vs. Pendente) ---
         ax1.set_title('Visão Geral dos Itens', fontsize=16, fontweight='bold')
         sns.barplot(x=['Total de Itens', 'Pendentes (PB)'], y=[total_punches, pending_reply],
-                    palette=[cor_principal, cor_destaque], ax=ax1, width=0.5)
+                    palette=[cor_principal, cor_destaque], ax=ax1, width=0.5, hue=['Total de Itens', 'Pendentes (PB)'], legend=False)
         ax1.set_ylabel('Quantidade', fontsize=12)
         ax1.grid(axis='y', linestyle='--', alpha=0.7)
 
@@ -215,7 +246,7 @@ def gerar_dashboard_imagem(dados):
             valores_disciplinas = [item[1] for item in disciplinas_sorted]
 
             ax2.set_title('Pendências por Disciplina', fontsize=16, fontweight='bold')
-            sns.barplot(x=valores_disciplinas, y=nomes_disciplinas, palette="viridis", ax=ax2, orient='h')
+            sns.barplot(x=valores_disciplinas, y=nomes_disciplinas, palette="viridis", ax=ax2, orient='h', hue=nomes_disciplinas, legend=False)
             ax2.set_xlabel('Quantidade de Itens Pendentes', fontsize=12)
             ax2.grid(axis='x', linestyle='--', alpha=0.7)
 
@@ -317,7 +348,6 @@ def enviar_email_ehouse(dados):
             </style>
         </head>
         <body>
-            <p class="highlight">[MENSAGEM AUTOMÁTICA IMPORTANTE]</p>
             <p class="mention">@Acompanhamento Design Review TS</p>
             <p>Prezados,</p>
             <p>Segue a atualização de status da <b>Punch List E-House</b>:</p>
@@ -329,7 +359,7 @@ def enviar_email_ehouse(dados):
 
             <p><i>O gráfico de status está anexado a este e-mail.</i></p>
             <p>Atenciosamente,</p>
-            <p><b>Automação de Relatórios DR90 E-House</b></p>
+            <p><b>Daniel Alves Anversi - Digital Engineering</b></p>
         </body>
         </html>
         """
@@ -343,6 +373,119 @@ def enviar_email_ehouse(dados):
     except Exception as e:
         erro_detalhado = traceback.format_exc()
         print(f"ERRO CRÍTICO ao enviar e-mail de E-House: {str(e)}\n{erro_detalhado}")
+
+
+def gerar_dashboard_vendors(dados):
+    """
+    Gera uma imagem de dashboard para o status de Vendors.
+    """
+    log = []
+    try:
+        total_punches = dados['total_punches']
+        pending_reply = dados.get('total_pending', 0)
+        disciplinas = dados['disciplina_counts']
+
+        sns.set_style("whitegrid")
+        plt.rcParams['font.family'] = 'sans-serif'
+        plt.rcParams['font.sans-serif'] = 'Calibri'
+
+        cor_principal = "#2E8B57" # Verde Mar
+        cor_destaque = "#FFD700" # Dourado
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 2]})
+        fig.suptitle('Status Report - Vendor Packages DR90', fontsize=24, fontweight='bold', color=cor_principal)
+
+        ax1.set_title('Visão Geral dos Itens', fontsize=16, fontweight='bold')
+        sns.barplot(x=['Total de Itens', 'Pendentes (PB)'], y=[total_punches, pending_reply],
+                    palette=[cor_principal, cor_destaque], ax=ax1, width=0.5, hue=['Total de Itens', 'Pendentes (PB)'], legend=False)
+        ax1.set_ylabel('Quantidade', fontsize=12)
+        ax1.grid(axis='y', linestyle='--', alpha=0.7)
+
+        for p in ax1.patches:
+            ax1.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()),
+                         ha='center', va='center', fontsize=14, color='black', xytext=(0, 10), textcoords='offset points')
+
+        if disciplinas:
+            disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
+            nomes_disciplinas = [item[0] for item in disciplinas_sorted]
+            valores_disciplinas = [item[1] for item in disciplinas_sorted]
+            ax2.set_title('Pendências por Disciplina', fontsize=16, fontweight='bold')
+            sns.barplot(x=valores_disciplinas, y=nomes_disciplinas, palette="crest", ax=ax2, orient='h', hue=nomes_disciplinas, legend=False)
+            ax2.set_xlabel('Quantidade de Itens Pendentes', fontsize=12)
+            ax2.grid(axis='x', linestyle='--', alpha=0.7)
+            for index, value in enumerate(valores_disciplinas):
+                ax2.text(value, index, f' {value}', va='center', fontsize=12, color='black')
+        else:
+            ax2.set_title('Nenhuma Pendência por Disciplina', fontsize=16, fontweight='bold')
+            ax2.text(0.5, 0.5, 'Sem dados para exibir', ha='center', va='center', fontsize=14)
+            ax2.set_xticks([]); ax2.set_yticks([])
+
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.savefig(PATH_VENDORS_GRAPH, dpi=200, bbox_inches='tight')
+        plt.close()
+
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dashboard de Vendors gerado com sucesso.")
+        return True, log
+
+    except Exception as e:
+        erro_detalhado = traceback.format_exc()
+        log.append(f"ERRO CRÍTICO ao gerar dashboard de Vendors: {str(e)}\n{erro_detalhado}")
+        return False, log
+
+
+def enviar_email_vendors(dados):
+    """
+    Envia um e-mail de status específico para a punch list de Vendors.
+    """
+    if dados is None or dados.get("total_pending", 0) == 0:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Nenhum item 'Pending Petrobras' em Vendors. E-mail não enviado.")
+        return
+
+    try:
+        outlook = win32.Dispatch('outlook.application')
+        mail = outlook.CreateItem(0)
+        mail.Importance = 2
+        mail.To = EMAIL_DESTINO
+        mail.Subject = f"Status Report: Punch List DR90 Vendors - {datetime.now().strftime('%d/%m/%Y')}"
+
+        disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
+
+        mail.HTMLBody = f"""
+        <html lang="pt-BR">
+        <head>
+            <style>
+                body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
+                p {{ margin: 10px 0; }}
+                .highlight {{ color: #c00000; font-weight: bold; }}
+                .mention {{ font-weight: bold; color: #005a9e; }}
+            </style>
+        </head>
+        <body>
+            <p class="mention">@Acompanhamento Design Review TS</p>
+            <p>Prezados,</p>
+            <p>Segue a atualização de status da <b>Punch List de Vendors (Fornecedores)</b>:</p>
+
+            <p>Atualmente, temos <span class="highlight">{dados['total_pending']}</span> itens com status <b>Pending Petrobras</b>.</p>
+
+            <p><b>Detalhamento por Disciplina:</b></p>
+            <ul>{disciplinas_html}</ul>
+
+            <p><i>O dashboard de status está anexado a este e-mail.</i></p>
+            <p>Atenciosamente,</p>
+            <p><b>Daniel Alves Anversi - Digital Engineering</b></p>
+        </body>
+        </html>
+        """
+
+        if os.path.exists(PATH_VENDORS_GRAPH):
+            mail.Attachments.Add(PATH_VENDORS_GRAPH)
+
+        mail.Send()
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de status Vendors enviado com sucesso.")
+
+    except Exception as e:
+        erro_detalhado = traceback.format_exc()
+        print(f"ERRO CRÍTICO ao enviar e-mail de Vendors: {str(e)}\n{erro_detalhado}")
 
 
 def enviar_email(dados, log_processo):
@@ -400,7 +543,6 @@ def enviar_email(dados, log_processo):
             </style>
         </head>
         <body>
-            <p class="highlight">[MENSAGEM AUTOMÁTICA IMPORTANTE]</p>
             <p class="mention">@Acompanhamento Design Review TS</p>
             <p>Prezados,</p>
             <p>Segue a atualização diária das pendências do <b>Design Review TS</b>:</p>
@@ -431,7 +573,7 @@ def enviar_email(dados, log_processo):
 
             <p><i>O dashboard atualizado e as planilhas de ação (quando aplicável) estão anexados a este e-mail.</i></p>
             <p>Atenciosamente,</p>
-            <p><b>Automação de Relatórios DR90 TS</b></p>
+            <p><b>Daniel Alves Anversi - Digital Engineering</b></p>
         </body>
         </html>
         """
@@ -487,8 +629,8 @@ def enviar_mensagem_julius(dados):
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
         mail.To = EMAIL_JULIUS
-        mail.CC = EMAIL_JULIUS
-        mail.Subject = f"Action Required: Punch List Items for Closure - {datetime.now().strftime('%Y-%m-%d')}"
+        mail.BCC = EMAIL_DESTINO  # Adiciona o canal do Teams em cópia oculta
+        mail.Subject = f"Action Required: {len(df_julius_check)} Punch List Items for Closure - {datetime.now().strftime('%d/%m/%Y')}"
         mail.Importance = 2
 
         mail.HTMLBody = f"""
@@ -497,14 +639,17 @@ def enviar_mensagem_julius(dados):
             <style>
                 body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
                 p {{ margin: 10px 0; }}
+                .highlight {{ font-weight: bold; color: #004488; }}
             </style>
         </head>
         <body>
-            <p>Hi Julius,</p>
-            <p>Please find attached the list of <b>{len(df_julius_check)}</b> punch list items that have been marked with 'True' by the Operation team and require your attention for closure.</p>
-            <p>The spreadsheet <i>'Julius to check.xlsx'</i> is attached for your review.</p>
-            <p>Thank you,</p>
-            <p><b>DR90 TS Report Automation</b></p>
+            <p>Dear Julius,</p>
+            <p>This is an automated notification regarding <span class="highlight">{len(df_julius_check)} punch list items</span> that have been approved by the Operation team and are now awaiting final closure.</p>
+            <p>Your action is required to proceed with the final verification for these items.</p>
+            <p>The detailed list is attached in the spreadsheet <i>'Julius to check.xlsx'</i> for your convenience.</p>
+            <p>Thank you for your attention to this matter.</p>
+            <p>Best regards,</p>
+            <p><b>Daniel Alves Anversi - Digital Engineering</b></p>
         </body>
         </html>
         """
@@ -519,85 +664,69 @@ def enviar_mensagem_julius(dados):
 
 # --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
-    print("--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ---")
+    print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
     hora_atual = datetime.now().hour
 
     # --- FLUXO 1: Relatório Principal (Topside) ---
-    print("\n--- Processando Relatório Principal (Topside) ---")
+    print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
     dados_topside, log_topside, sucesso_topside = processar_dados()
-
     if sucesso_topside:
-        print("Dados Topside processados com sucesso.")
+        print("-> Dados Topside processados com sucesso.")
         sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
         log_total_topside = log_topside + log_dashboard
-
-        if sucesso_dashboard:
-            print("Dashboard Topside gerado com sucesso.")
-        else:
-            print("!!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
-
-        print("Enviando e-mail do relatório principal...")
+        if sucesso_dashboard: print("-> Dashboard Topside gerado com sucesso.")
+        else: print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
         enviar_email(dados_topside, log_total_topside)
-
-        if 7 <= hora_atual < 9:
-            print("Verificando itens para Julius...")
-            enviar_mensagem_julius(dados_topside)
     else:
         print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
         enviar_email_de_falha(log_topside)
 
-    # --- FLUXO 2: Relatório E-House ---
-    print("\n--- Processando Relatório E-House ---")
-    dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
-
-    if sucesso_ehouse:
-        print("Dados E-House processados com sucesso.")
-        sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados_ehouse)
-
-        if sucesso_grafico:
-            print("Gráfico E-House gerado com sucesso.")
-            enviar_email_ehouse(dados_ehouse)
+    # --- FLUXO 2: E-mail para Julius ---
+    print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
+    if 7 <= hora_atual < 9:
+        if sucesso_topside:
+            enviar_mensagem_julius(dados_topside)
         else:
-            print("!!! FALHA NA GERAÇÃO DO GRÁFICO E-HOUSE !!!")
-            # Envia e-mail de falha específico para o fluxo E-House se o gráfico falhar
-            enviar_email_de_falha(log_ehouse + log_grafico)
+            print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
     else:
-        # Não envia e-mail de falha se o arquivo não for encontrado, pois pode não estar disponível sempre.
-        if "Arquivo E-House não encontrado" not in log_ehouse[0]:
-             print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE !!!")
-             enviar_email_de_falha(log_ehouse)
+        print(f"-> Fora do horário agendado (executado às {hora_atual}h). E-mail para Julius não enviado.")
 
-    print("\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ---")
+    # --- FLUXO 3: Relatório E-House ---
+    print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
+    try:
+        dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
+        if sucesso_ehouse:
+            print("-> Dados E-House processados com sucesso.")
+            sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados_ehouse)
+            if sucesso_grafico:
+                print("-> Gráfico E-House gerado com sucesso.")
+                enviar_email_ehouse(dados_ehouse)
+            else:
+                print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO E-HOUSE !!!")
+                enviar_email_de_falha(log_ehouse + log_grafico)
+    except FileNotFoundError as e:
+        print(f"-> Arquivo E-House não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
+    except Exception as e:
+        print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE: {e} !!!")
+        enviar_email_de_falha([str(e)])
 
-# --- COMO AGENDAR A EXECUÇÃO AUTOMÁTICA (WINDOWS) ---
-"""
-Para que este script seja executado automaticamente nos horários desejados (08:00, 12:00, 16:30),
-você pode usar o Agendador de Tarefas do Windows. Siga os passos abaixo:
+    # --- FLUXO 4: Relatório Vendors ---
+    print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
+    try:
+        dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
+        if sucesso_vendors:
+            print("-> Dados de Vendors processados com sucesso.")
+            sucesso_grafico, log_grafico = gerar_dashboard_vendors(dados_vendors)
+            if sucesso_grafico:
+                print("-> Dashboard de Vendors gerado com sucesso.")
+                enviar_email_vendors(dados_vendors)
+            else:
+                print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE VENDORS !!!")
+                enviar_email_de_falha(log_vendors + log_grafico)
+    except FileNotFoundError as e:
+        print(f"-> Arquivo de Vendors não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
+    except Exception as e:
+        print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE VENDORS: {e} !!!")
+        enviar_email_de_falha([str(e)])
 
-1.  Abra o Agendador de Tarefas:
-    - Pressione a tecla Windows + R, digite `taskschd.msc` e pressione Enter.
-
-2.  Crie uma Tarefa Básica:
-    - No painel Ações à direita, clique em "Criar Tarefa Básica...".
-    - Dê um nome à tarefa (ex: "Relatorio Punch List Diario") e uma descrição. Clique em "Avançar".
-
-3.  Configure o Disparador (gatilho):
-    - Escolha "Diariamente" e clique em "Avançar".
-    - Deixe a data de início como a data atual e configure "Repetir a cada" para "1" dias. Clique em "Avançar".
-
-4.  Configure os Horários:
-    - Na janela de Propriedades da tarefa (marque "Abrir Propriedades" ao concluir), vá para a guia "Disparadores".
-    - Clique em "Novo..." e crie um gatilho para as 08:00.
-    - Repita o processo para criar gatilhos para as 12:00 e 16:30.
-
-5.  Configure a Ação:
-    - Em "Programa/script", coloque o caminho completo para o seu executável do Python (ex: C:\\Python39\\python.exe).
-    - Em "Adicione argumentos", coloque o nome do script: `ofensor.py`.
-    - Em "Iniciar em", coloque o caminho para a pasta do projeto (ex: C:\\Users\\SeuUsuario\\PycharmProjects\\pythonProject).
-
-6.  Ajustes Finais:
-    - Na guia "Condições", desmarque a opção de energia para garantir a execução na bateria.
-    - Na guia "Configurações", marque "Executar tarefa o mais rápido possível após uma inicialização agendada ter sido perdida".
-
-Pronto! O script rodará nos horários definidos, e a lógica interna cuidará de qual e-mail enviar.
-"""
+    print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")

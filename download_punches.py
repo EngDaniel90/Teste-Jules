@@ -13,13 +13,13 @@ SHAREPOINT_SITE_URL = "https://seatrium.sharepoint.com/sites/P84P85DesignReview"
 # --- CONFIGURAÇÕES DAS PLANILHAS ---
 PUNCH_LISTS = {
     "Topside": {
-        "url": "/sites/P84P85DesignReview/Lists/DR90%20Topside%20Punchlist/AllItems.aspx",
+        "list_title": "DR90 Topside Punchlist",
         "file_name": "Punch_DR90_TS.xlsx",
         "save_path": r"C:\Users\E797\Downloads\Teste mensagem e print",
         "columns_to_keep": None  # Manter todas as colunas
     },
     "E-House": {
-        "url": "/sites/P84P85DesignReview/Lists/DR90%20EHouse%20Punchlist/AllItems.aspx?e=bTNUys&CID=98bfe3a1%2D508a%2D6000%2D2c51%2D857abb203708&cidOR=SPO&ovuser=5b6f6241%2D9a57%2D4be4%2D8e50%2D1dfa72e79a57%2Cdaniel%2Eanversi%40petrobras%2Ecom%2Ebr&OR=Teams%2DHL&CT=1766373503454&clickparams=eyJBcHBOYW1lIjoiVGVhbXMtRGVza3RvcCIsIkFwcFZlcnNpb24iOiI0OS8yNTExMzAwMTMxMiIsIkhhc0ZlZGVyYXRlZFVzZXIiOnRydWV9",
+        "list_title": "DR90 E-House Punchlist",
         "file_name": "Punch_DR90_E-House.xlsx",
         "save_path": r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches",
         "columns_to_keep": [
@@ -37,7 +37,7 @@ PUNCH_LISTS = {
         ]
     },
     "Vendors": {
-        "url": "/sites/P84P85DesignReview/Lists/Vendor%20Package%20Review%20Punchlist%20DR90/AllItems.aspx?e=4tHLty&CID=43904b9e%2D7cb2%2D481c%2Db136%2D5285ae014bd9&ovuser=5b6f6241%2D9a57%2D4be4%2D8e50%2D1dfa72e79a57%2Cleojunqueira%40petrobras%2Ecom%2Ebr",
+        "list_title": "Vendor Package Review Punchlist DR90",
         "file_name": "Punch_DR90_Vendors.xlsx",
         "save_path": r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches",
         "columns_to_keep": [
@@ -63,8 +63,8 @@ def format_as_table(writer, df, sheet_name):
 
 def download_and_process_list(ctx, list_config):
     """Baixa uma lista do SharePoint, processa e salva como Excel."""
-    list_name = list_config["url"].split("/")[-2]
-    list_obj = ctx.web.lists.get_by_title(list_name)
+    list_title = list_config["list_title"]
+    list_obj = ctx.web.lists.get_by_title(list_title)
 
     items = list_obj.get_items().execute_query()
 
