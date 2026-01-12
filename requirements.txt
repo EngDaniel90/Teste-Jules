@@ -5,3 +5,4 @@ matplotlib
 seaborn
 Office365-REST-Python-Client
 xlsxwriter
+schedule
