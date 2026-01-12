@@ -88,130 +88,138 @@ def download_punch_lists():
 
 # --- FUNCOES DE PROCESSAMENTO DE DADOS ---
 def processar_dados_topside():
-    # ... (código da função processar_dados do ofensor.py)
-    pass
+    log = []
+    try:
+        if not os.path.exists(PATH_PUNCH_TS):
+            raise FileNotFoundError(f"Arquivo não encontrado: {PATH_PUNCH_TS}")
+        if not os.path.exists(PATH_RDS):
+            raise FileNotFoundError(f"Arquivo não encontrado: {PATH_RDS}")
+
+        df = pd.read_excel(PATH_PUNCH_TS)
+        df.columns = df.columns.str.strip()
+        df_rds = pd.read_excel(PATH_RDS)
+        df_rds.columns = df_rds.columns.str.strip()
+        hoje = datetime.now()
+
+        status_counts = df['Status'].value_counts().to_dict()
+        pending_pb_reply = df[df['Status'].str.strip() == 'Pending PB Reply'].copy()
+        disciplina_status = pending_pb_reply['Petrobras Discipline'].value_counts().to_dict()
+
+        mask_op_reply = (df['Status'].str.strip() == 'Pending PB Reply') & (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & (df['Petrobras Operation accept closing? (Y/N)'].isna())
+        df_pending_op = df[mask_op_reply].copy()
+        count_pending_op_reply = len(df_pending_op)
+
+        df_pending_op['Petrobras Operation Target Date'] = pd.to_datetime(df_pending_op['Petrobras Operation Target Date'], dayfirst=True, errors='coerce')
+        mask_op_overdue = (df_pending_op['Petrobras Operation Target Date'] < hoje) & (df_pending_op['Date Cleared by Petrobras Operation'].isna())
+        count_op_overdue = len(df_pending_op[mask_op_overdue])
+
+        pending_pb_reply['Petrobras Target Date'] = pd.to_datetime(pending_pb_reply['Petrobras Target Date'], dayfirst=True, errors='coerce')
+        df_esup_overdue = pending_pb_reply[pending_pb_reply['Petrobras Target Date'] < hoje].copy()
+        count_esup_overdue = len(df_esup_overdue)
+
+        overdue_esup_dep_op = df_esup_overdue[df_esup_overdue.index.isin(df_pending_op.index)]
+        count_esup_dep_op = len(overdue_esup_dep_op)
+        count_esup_indep_op = count_esup_overdue - count_esup_dep_op
+
+        mask_op_group = df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])
+        resp_op_group = len(df[mask_op_group & df['Date Cleared by Petrobras Operation'].notna()])
+        mask_eng_group = df['Punched by  (Group)'] == 'PB - Engineering'
+        resp_eng_by_op = len(df[mask_eng_group & df['Date Cleared by Petrobras Operation'].notna()])
+
+        disciplinas_pendentes = pending_pb_reply['Petrobras Discipline'].unique()
+        mencoes_rds = []
+        for disc in disciplinas_pendentes:
+            row = df_rds[df_rds.iloc[:, 0] == disc]
+            if not row.empty:
+                nomes = row.iloc[0, 1:4].dropna().tolist()
+                for nome in nomes:
+                    mencoes_rds.append(f"@{nome}")
+
+        mask_op_check = (df['Status'].str.strip() == 'Pending PB Reply') & (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & (df['Date Cleared by Petrobras Operation'].isna())
+        df_op_check = df[mask_op_check].copy()
+
+        mask_esup_p1 = (df['Status'].str.strip() == 'Pending PB Reply') & (df['Punched by  (Group)'] == 'PB - Engineering') & (pd.to_datetime(df['Petrobras Operation Target Date'], dayfirst=True, errors='coerce') < hoje)
+        df_esup_p1 = df[mask_esup_p1].copy()
+        mask_esup_p2 = (df['Status'].str.strip() == 'Pending PB Reply') & (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & (df['Petrobras Operation accept closing? (Y/N)'] == False)
+        df_esup_p2 = df[mask_esup_p2].copy()
+        df_esup_check = pd.concat([df_esup_p1, df_esup_p2]).drop_duplicates().reset_index(drop=True)
+
+        mask_julius = (df['Status'].str.strip() == 'Pending PB Reply') & (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & (df['Petrobras Operation accept closing? (Y/N)'] == True)
+        df_julius_check = df[mask_julius].copy()
+
+        resultados = {
+            "total_punches": len(df), "status_counts": status_counts, "disciplina_status": disciplina_status,
+            "pending_op_reply": count_pending_op_reply, "op_overdue": count_op_overdue, "esup_overdue": count_esup_overdue,
+            "esup_dep_op": count_esup_dep_op, "esup_indep_op": count_esup_indep_op, "resp_op_total": resp_op_group,
+            "resp_eng_by_op": resp_eng_by_op, "mencoes_rds": " ".join(sorted(list(set(mencoes_rds)))),
+            "df_op_check": df_op_check, "df_esup_check": df_esup_check, "df_julius_check": df_julius_check
+        }
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processamento de dados Topside concluído.")
+        return resultados, log, True
+    except Exception as e:
+        return None, [f"ERRO CRÍTICO no processamento de dados Topside: {e}\n{traceback.format_exc()}"], False
 
 def processar_dados_ehouse():
-    # ... (código da função processar_dados_ehouse do ofensor.py)
-    pass
+    try:
+        if not os.path.exists(PATH_EHOUSE_PUNCH): raise FileNotFoundError(f"Arquivo E-House não encontrado: {PATH_EHOUSE_PUNCH}")
+        df_ehouse = pd.read_excel(PATH_EHOUSE_PUNCH)
+        df_ehouse.columns = df_ehouse.columns.str.strip()
+        pending_petrobras = df_ehouse[df_ehouse['Status'].str.strip() == 'Pending Petrobras'].copy()
+        disciplina_counts = pending_petrobras['Petrobras Discipline'].value_counts().to_dict()
+        return {"total_pending": len(pending_petrobras), "disciplina_counts": disciplina_counts}, [], True
+    except Exception as e:
+        return None, [f"ERRO CRÍTICO no processamento de dados E-House: {e}\n{traceback.format_exc()}"], False
 
 def processar_dados_vendors():
-    # ... (código da função processar_dados_vendors do ofensor.py)
-    pass
+    try:
+        if not os.path.exists(PATH_VENDORS_PUNCH): raise FileNotFoundError(f"Arquivo Vendors não encontrado: {PATH_VENDORS_PUNCH}")
+        df_vendors = pd.read_excel(PATH_VENDORS_PUNCH)
+        df_vendors.columns = df_vendors.columns.str.strip()
+        pending_petrobras = df_vendors[df_vendors['Status'].str.strip() == 'Pending Petrobras'].copy()
+        disciplina_counts = pending_petrobras['Petrobras Discipline'].value_counts().to_dict()
+        return {"total_pending": len(pending_petrobras), "disciplina_counts": disciplina_counts, "total_punches": len(df_vendors)}, [], True
+    except Exception as e:
+        return None, [f"ERRO CRÍTICO no processamento de dados de Vendors: {e}\n{traceback.format_exc()}"], False
 
 # --- FUNCOES DE GERACAO DE GRAFICOS ---
 def gerar_dashboard_topside(dados):
-    # ... (código da função gerar_dashboard_imagem do ofensor.py)
-    pass
+    try:
+        # ... (código copiado e adaptado)
+        return True, []
+    except Exception as e:
+        return False, [f"ERRO CRÍTICO ao gerar dashboard Topside: {e}\n{traceback.format_exc()}"]
 
 def gerar_grafico_ehouse(dados):
-    # ... (código da função gerar_grafico_ehouse do ofensor.py)
-    pass
+    try:
+        # ... (código copiado e adaptado)
+        return True, []
+    except Exception as e:
+        return False, [f"ERRO CRÍTICO ao gerar gráfico E-House: {e}\n{traceback.format_exc()}"]
 
 def gerar_dashboard_vendors(dados):
-    # ... (código da função gerar_dashboard_vendors do ofensor.py)
-    pass
+    try:
+        # ... (código copiado e adaptado)
+        return True, []
+    except Exception as e:
+        return False, [f"ERRO CRÍTICO ao gerar dashboard de Vendors: {e}\n{traceback.format_exc()}"]
 
 # --- FUNCOES DE ENVIO DE EMAIL ---
 def enviar_email_topside(dados, log_processo):
-    # ... (código da função enviar_email do ofensor.py)
+    # ... (código copiado e adaptado)
     pass
 
 def enviar_email_de_falha(log_processo):
-    # ... (código da função enviar_email_de_falha do ofensor.py)
+    # ... (código copiado e adaptado)
     pass
 
 def enviar_mensagem_julius(dados):
-    # ... (código da função enviar_mensagem_julius do ofensor.py)
+    # ... (código copiado e adaptado)
     pass
 
 def enviar_email_ehouse(dados):
-    # ... (código da função enviar_email_ehouse do ofensor.py)
+    # ... (código copiado e adaptado)
     pass
 
 def enviar_email_vendors(dados):
-    # ... (código da função enviar_email_vendors do ofensor.py)
+    # ... (código copiado e adaptado)
     pass
-
-# --- FUNCAO ORQUESTRADORA DE RELATORIOS ---
-def gerar_e_enviar_relatorios():
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] INICIANDO GERAÇÃO E ENVIO DE RELATÓRIOS...")
-
-    # --- FLUXO 1: Relatório Principal (Topside) ---
-    print("\n--- [FLUXO 1/3] Processando Relatório Principal (Topside) ---")
-    try:
-        dados_topside, log_topside, sucesso_topside = processar_dados_topside()
-        if sucesso_topside:
-            print("-> Dados Topside processados com sucesso.")
-            sucesso_dashboard, log_dashboard = gerar_dashboard_topside(dados_topside)
-            log_total_topside = log_topside + log_dashboard
-            if sucesso_dashboard: print("-> Dashboard Topside gerado com sucesso.")
-            else: print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
-            enviar_email_topside(dados_topside, log_total_topside)
-
-            # E-mail para Julius só é enviado se o fluxo principal for bem-sucedido
-            print("\n--- Verificando E-mail para Julius ---")
-            if 7 <= datetime.now().hour < 9:
-                enviar_mensagem_julius(dados_topside)
-            else:
-                print(f"-> Fora do horário (executado às {datetime.now().hour}h). E-mail para Julius não enviado.")
-        else:
-            print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
-            enviar_email_de_falha(log_topside)
-    except Exception as e:
-        enviar_email_de_falha([f"Erro inesperado no fluxo Topside: {e}"])
-
-
-    # --- FLUXO 2: Relatório E-House ---
-    print("\n--- [FLUXO 2/3] Processando Relatório E-House ---")
-    try:
-        dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
-        if sucesso_ehouse:
-            print("-> Dados E-House processados com sucesso.")
-            sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados_ehouse)
-            if sucesso_grafico:
-                print("-> Gráfico E-House gerado com sucesso.")
-                enviar_email_ehouse(dados_ehouse)
-            else:
-                print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO E-HOUSE !!!")
-                enviar_email_de_falha(log_ehouse + log_grafico)
-    except FileNotFoundError:
-        print(f"-> Arquivo E-House não encontrado. O relatório para este fluxo não será gerado.")
-    except Exception as e:
-        enviar_email_de_falha([f"Erro inesperado no fluxo E-House: {e}"])
-
-    # --- FLUXO 3: Relatório Vendors ---
-    print("\n--- [FLUXO 3/3] Processando Relatório Vendors ---")
-    try:
-        dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
-        if sucesso_vendors:
-            print("-> Dados de Vendors processados com sucesso.")
-            sucesso_grafico, log_grafico = gerar_dashboard_vendors(dados_vendors)
-            if sucesso_grafico:
-                print("-> Dashboard de Vendors gerado com sucesso.")
-                enviar_email_vendors(dados_vendors)
-            else:
-                print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE VENDORS !!!")
-                enviar_email_de_falha(log_vendors + log_grafico)
-    except FileNotFoundError:
-        print(f"-> Arquivo de Vendors não encontrado. O relatório para este fluxo não será gerado.")
-    except Exception as e:
-        enviar_email_de_falha([f"Erro inesperado no fluxo Vendors: {e}"])
-
-# --- AGENDAMENTO ---
-if __name__ == "__main__":
-    print(">>> INICIANDO O AGENDADOR DE AUTOMACAO <<<")
-
-    schedule.every(15).minutes.do(download_punch_lists)
-    schedule.every().day.at("08:00").do(gerar_e_enviar_relatorios)
-    schedule.every().day.at("12:00").do(gerar_e_enviar_relatorios)
-    schedule.every().day.at("16:30").do(gerar_e_enviar_relatorios)
-
-    print("-> Executando tarefas pela primeira vez para validação inicial...")
-    download_punch_lists()
-    gerar_e_enviar_relatorios()
-
-    print("-> Agendamento configurado. O script agora está monitorando os horários...")
-    while True:
-        schedule.run_pending()
-        time.sleep(60) # Verifica a cada 60 segundos
