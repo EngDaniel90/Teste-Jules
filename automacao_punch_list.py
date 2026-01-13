@@ -27,7 +27,7 @@ os.environ['WDM_SSL_VERIFY'] = '0'
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- CONFIGURAÇÕES DO AMBIENTE ---
-URL_LOGIN_SEATRIUM = "https://seatrium.sharepoint.com/sites/P84P85DesignReview/Lists/P8485_TOPSIDE_DR90_Punch_List/Updated%20View.aspx"
+URL_LOGIN_SEATRIUM = "https://seatrium.sharepoint.com/:l:/r/sites/P84P85DesignReview/Lists/DR90%20EHouse%20Punchlist?e=Is2qGr"
 URL_BASE_SHAREPOINT = "https://seatrium.sharepoint.com/sites/P84P85DesignReview"
 
 PASTA_DESTINO = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches"
@@ -51,7 +51,7 @@ LISTAS_SHAREPOINT = {
         ]
     },
     "E-House": {
-        "nome_api": "DR90 EHouse Punchlist",
+        "nome_api": "DR90EHousePunchlist",
         "arquivo_saida": "Punch_DR90_E-House.xlsx",
         "colunas": [
             "Punch No", "Zone", "DECK No.", "Zone-Punch Number", "Action Description", "Punched by", "Punch SnapShot1",
@@ -123,12 +123,12 @@ class AutomacaoPunchList:
 
             if "Date" in col or df[col].str.contains(r'\d{4}-\d{2}-\d{2}T', na=False).any():
                 try:
-                    # Converte forçando formato ISO para evitar Warnings
-                    df_dt = pd.to_datetime(df[col], errors='coerce', utc=True)
+                    # Especifica o formato para evitar UserWarning e garantir a conversão correta
+                    df_dt = pd.to_datetime(df[col], format='%Y-%m-%dT%H:%M:%SZ', errors='coerce', utc=True)
                     mask = df_dt.notna()
                     df.loc[mask, col] = df_dt[mask].dt.strftime('%d/%m/%Y')
                     df.loc[:, col] = df[col].replace(['NaT', 'nan', 'None', 'nan/nan/nan'], "")
-                except:
+                except Exception:  # Captura exceções caso o formato não seja consistente
                     continue
 
         return df
