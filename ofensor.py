@@ -6,22 +6,39 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 
-# --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
-PATH_PUNCH = r'C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx'
-PATH_RDS = r'C:\Users\E797\Downloads\Teste mensagem e print\RDs\RDs.xlsx'
-PATH_DASHBOARD_IMG = r'C:\Users\E797\Downloads\Teste mensagem e print\dashboard_status.png'
-PATH_OP_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\Operation to check.xlsx'
-PATH_ESUP_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\ESUP to check.xlsx'
-PATH_JULIUS_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\Julius to check.xlsx'
-PATH_EHOUSE_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_E-House.xlsx"
-PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
-PATH_VENDORS_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_Vendors.xlsx"
-PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
-PATH_LAST_RUN = r'C:\Users\E797\Downloads\Teste mensagem e print\last_run.txt'
-PATH_FECHAMENTO_GRAPH = r'C:\Users\E797\Downloads\Teste mensagem e print\fechamento_operacao.png'
+# --- CONFIGURAÇÕES GERAIS ---
+PATHS = {
+    "punch": r'C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx',
+    "rds": r'C:\Users\E797\Downloads\Teste mensagem e print\RDs\RDs.xlsx',
+    "dashboard_img": r'C:\Users\E797\Downloads\Teste mensagem e print\dashboard_status.png',
+    "op_check": r'C:\Users\E797\Downloads\Teste mensagem e print\Operation to check.xlsx',
+    "esup_check": r'C:\Users\E797\Downloads\Teste mensagem e print\ESUP to check.xlsx',
+    "julius_check": r'C:\Users\E797\Downloads\Teste mensagem e print\Julius to check.xlsx',
+    "ehouse_punch": r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_E-House.xlsx",
+    "ehouse_graph": r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png",
+    "vendors_punch": r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_Vendors.xlsx",
+    "vendors_graph": r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png",
+    "last_run": r'C:\Users\E797\Downloads\Teste mensagem e print\last_run.txt',
+    "fechamento_graph": r'C:\Users\E797\Downloads\Teste mensagem e print\fechamento_operacao.png'
+}
 EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
 SCHEDULED_HOURS = [7, 12, 18]
+
+
+def verificar_arquivos_necessarios():
+    """
+    Verifica se todos os arquivos de entrada essenciais existem antes de prosseguir.
+    Retorna uma lista de arquivos ausentes.
+    """
+    arquivos_essenciais = [
+        PATHS['punch'],
+        PATHS['rds'],
+        PATHS['ehouse_punch'],
+        PATHS['vendors_punch']
+    ]
+    arquivos_ausentes = [caminho for caminho in arquivos_essenciais if not os.path.exists(caminho)]
+    return arquivos_ausentes
 
 
 def deve_executar():
@@ -32,12 +49,12 @@ def deve_executar():
     hora_atual = datetime.now().hour
 
     # Verifica se o arquivo de última execução existe
-    if not os.path.exists(PATH_LAST_RUN):
+    if not os.path.exists(PATHS['last_run']):
         print("Arquivo de última execução não encontrado. Executando pela primeira vez.")
         return True
 
     # Lê a data da última execução
-    with open(PATH_LAST_RUN, 'r') as f:
+    with open(PATHS['last_run'], 'r') as f:
         try:
             ultima_execucao_str = f.read().strip()
             ultima_execucao_data = datetime.strptime(ultima_execucao_str, '%Y-%m-%d').date()
@@ -64,7 +81,7 @@ def registrar_execucao():
     Registra a data e hora da execução atual no arquivo de controle.
     """
     try:
-        with open(PATH_LAST_RUN, 'w') as f:
+        with open(PATHS['last_run'], 'w') as f:
             f.write(datetime.now().strftime('%Y-%m-%d'))
         print("Data da execução registrada com sucesso.")
     except Exception as e:
@@ -77,10 +94,10 @@ def processar_dados_ehouse():
     """
     log = []
     try:
-        if not os.path.exists(PATH_EHOUSE_PUNCH):
-            raise FileNotFoundError(f"Arquivo E-House não encontrado: {PATH_EHOUSE_PUNCH}")
+        if not os.path.exists(PATHS['ehouse_punch']):
+            raise FileNotFoundError(f"Arquivo E-House não encontrado: {PATHS['ehouse_punch']}")
 
-        df_ehouse = pd.read_excel(PATH_EHOUSE_PUNCH)
+        df_ehouse = pd.read_excel(PATHS['ehouse_punch'])
         df_ehouse.columns = df_ehouse.columns.str.strip()
 
         pending_petrobras = df_ehouse[df_ehouse['Status'].str.strip() == 'Pending Petrobras'].copy()
@@ -105,10 +122,10 @@ def processar_dados_vendors():
     """
     log = []
     try:
-        if not os.path.exists(PATH_VENDORS_PUNCH):
-            raise FileNotFoundError(f"Arquivo Vendors não encontrado: {PATH_VENDORS_PUNCH}")
+        if not os.path.exists(PATHS['vendors_punch']):
+            raise FileNotFoundError(f"Arquivo Vendors não encontrado: {PATHS['vendors_punch']}")
 
-        df_vendors = pd.read_excel(PATH_VENDORS_PUNCH)
+        df_vendors = pd.read_excel(PATHS['vendors_punch'])
         df_vendors.columns = df_vendors.columns.str.strip()
 
         pending_petrobras = df_vendors[df_vendors['Status'].str.strip() == 'Pending Petrobras'].copy()
@@ -135,15 +152,15 @@ def processar_dados():
     log = []
     try:
         # 1. Carregamento e Validação dos Arquivos
-        if not os.path.exists(PATH_PUNCH):
-            raise FileNotFoundError(f"Arquivo não encontrado: {PATH_PUNCH}")
-        if not os.path.exists(PATH_RDS):
-            raise FileNotFoundError(f"Arquivo não encontrado: {PATH_RDS}")
+        if not os.path.exists(PATHS['punch']):
+            raise FileNotFoundError(f"Arquivo não encontrado: {PATHS['punch']}")
+        if not os.path.exists(PATHS['rds']):
+            raise FileNotFoundError(f"Arquivo não encontrado: {PATHS['rds']}")
 
-        df = pd.read_excel(PATH_PUNCH)
+        df = pd.read_excel(PATHS['punch'])
         df.columns = df.columns.str.strip()
 
-        df_rds = pd.read_excel(PATH_RDS)
+        df_rds = pd.read_excel(PATHS['rds'])
         df_rds.columns = df_rds.columns.str.strip()
 
         hoje = datetime.now()
@@ -312,7 +329,7 @@ def gerar_dashboard_imagem(dados):
             ax2.set_yticks([])
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        plt.savefig(PATH_DASHBOARD_IMG, dpi=200, bbox_inches='tight')
+        plt.savefig(PATHS['dashboard_img'], dpi=200, bbox_inches='tight')
         plt.close()
 
         log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dashboard gerado com sucesso.")
@@ -361,7 +378,7 @@ def gerar_grafico_ehouse(dados):
                         textcoords='offset points')
 
         plt.tight_layout()
-        plt.savefig(PATH_EHOUSE_GRAPH, dpi=200, bbox_inches='tight')
+        plt.savefig(PATHS['ehouse_graph'], dpi=200, bbox_inches='tight')
         plt.close()
 
         log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico E-House gerado com sucesso.")
@@ -418,8 +435,8 @@ def enviar_email_ehouse(dados):
         </html>
         """
 
-        if os.path.exists(PATH_EHOUSE_GRAPH):
-            mail.Attachments.Add(PATH_EHOUSE_GRAPH)
+        if os.path.exists(PATHS['ehouse_graph']):
+            mail.Attachments.Add(PATHS['ehouse_graph'])
 
         mail.Send()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de status E-House enviado com sucesso.")
@@ -465,7 +482,7 @@ def gerar_grafico_vendors(dados):
                         textcoords='offset points')
 
         plt.tight_layout()
-        plt.savefig(PATH_VENDORS_GRAPH, dpi=200, bbox_inches='tight')
+        plt.savefig(PATHS['vendors_graph'], dpi=200, bbox_inches='tight')
         plt.close()
 
         log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico de Vendors gerado com sucesso.")
@@ -516,7 +533,7 @@ def gerar_grafico_fechamento_operacao(df):
                             textcoords='offset points')
 
         plt.tight_layout()
-        plt.savefig(PATH_FECHAMENTO_GRAPH, dpi=200, bbox_inches='tight')
+        plt.savefig(PATHS['fechamento_graph'], dpi=200, bbox_inches='tight')
         plt.close()
 
         log.append(
@@ -574,8 +591,8 @@ def enviar_email_vendors(dados):
         </html>
         """
 
-        if os.path.exists(PATH_VENDORS_GRAPH):
-            mail.Attachments.Add(PATH_VENDORS_GRAPH)
+        if os.path.exists(PATHS['vendors_graph']):
+            mail.Attachments.Add(PATHS['vendors_graph'])
 
         mail.Send()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de status Vendors enviado com sucesso.")
@@ -602,8 +619,8 @@ def enviar_email(dados, log_processo):
         secao_op_check_html = ""
         df_op_check = dados.get("df_op_check")
         if df_op_check is not None and not df_op_check.empty:
-            df_op_check.to_excel(PATH_OP_CHECK, index=False)
-            mail.Attachments.Add(PATH_OP_CHECK)
+            df_op_check.to_excel(PATHS['op_check'], index=False)
+            mail.Attachments.Add(PATHS['op_check'])
             secao_op_check_html = f"""
             <div style="border: 2px solid red; padding: 10px; margin-top: 15px;">
                 <p><b style="color:red;">Ponto de Atenção - Operação:</b></p>
@@ -615,8 +632,8 @@ def enviar_email(dados, log_processo):
         secao_esup_check_html = ""
         df_esup_check = dados.get("df_esup_check")
         if df_esup_check is not None and not df_esup_check.empty:
-            df_esup_check.to_excel(PATH_ESUP_CHECK, index=False)
-            mail.Attachments.Add(PATH_ESUP_CHECK)
+            df_esup_check.to_excel(PATHS['esup_check'], index=False)
+            mail.Attachments.Add(PATHS['esup_check'])
             secao_esup_check_html = f"""
             <div style="border: 2px solid blue; padding: 10px; margin-top: 15px;">
                 <p><b style="color:blue;">Ponto de Atenção - ESUP (Engenharia):</b></p>
@@ -676,10 +693,10 @@ def enviar_email(dados, log_processo):
         </html>
         """
 
-        if os.path.exists(PATH_DASHBOARD_IMG):
-            mail.Attachments.Add(PATH_DASHBOARD_IMG)
-        if os.path.exists(PATH_FECHAMENTO_GRAPH):
-            mail.Attachments.Add(PATH_FECHAMENTO_GRAPH)
+        if os.path.exists(PATHS['dashboard_img']):
+            mail.Attachments.Add(PATHS['dashboard_img'])
+        if os.path.exists(PATHS['fechamento_graph']):
+            mail.Attachments.Add(PATHS['fechamento_graph'])
 
         mail.Send()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO}.")
@@ -725,7 +742,7 @@ def enviar_mensagem_julius(dados):
         return
 
     try:
-        df_julius_check.to_excel(PATH_JULIUS_CHECK, index=False)
+        df_julius_check.to_excel(PATHS['julius_check'], index=False)
 
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
@@ -754,7 +771,7 @@ def enviar_mensagem_julius(dados):
         </body>
         </html>
         """
-        mail.Attachments.Add(PATH_JULIUS_CHECK)
+        mail.Attachments.Add(PATHS['julius_check'])
         mail.Send()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail para Julius enviado com sucesso.")
 
@@ -767,8 +784,15 @@ def enviar_mensagem_julius(dados):
 if __name__ == "__main__":
     if deve_executar():
         print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
-        hora_atual = datetime.now().hour
-        sucesso_geral = True
+
+        arquivos_ausentes = verificar_arquivos_necessarios()
+        if arquivos_ausentes:
+            print("!!! FALHA CRÍTICA: Arquivos de entrada não encontrados !!!")
+            log_erro = [f"Arquivo não encontrado: {caminho}" for caminho in arquivos_ausentes]
+            enviar_email_de_falha(log_erro)
+        else:
+            hora_atual = datetime.now().hour
+            sucesso_geral = True
 
         # --- FLUXO 1: Relatório Principal (Topside) ---
         print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
