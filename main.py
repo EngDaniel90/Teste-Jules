@@ -55,8 +55,8 @@ LISTAS_SHAREPOINT = {
         ]
     },
     "E-House": {
-        "url": "[URL_SHAREPOINT_EHOUSE]",
-        "api_name": "[API_NAME_EHOUSE]",
+        "url": "https://seatrium.sharepoint.com/:l:/r/sites/P84P85DesignReview/Lists/DR90%20EHouse%20Punchlist?e=QCVEQf",
+        "api_name": "DR90 EHouse Punchlist",
         "output_file": "Punch_DR90_E-House.xlsx",
         "colunas": [
             "Punch No", "Zone", "DECK No.", "Zone-Punch Number", "Action Description", "Punched by",
@@ -73,8 +73,8 @@ LISTAS_SHAREPOINT = {
         ]
     },
     "Vendors": {
-        "url": "[URL_SHAREPOINT_VENDORS]",
-        "api_name": "[API_NAME_VENDORS]",
+        "url": "https://seatrium.sharepoint.com/sites/P84P85DesignReview/Lists/Vendor%20Package%20Review%20Punchlist%20DR90/AllItems.aspx?e=4tHLty&CID=43904b9e%2D7cb2%2D481c%2Db136%2D5285ae014bd9&ovuser=5b6f6241%2D9a57%2D4be4%2D8e50%2D1dfa72e79a57%2Cleojunqueira%40petrobras%2Ecom%2Ebr",
+        "api_name": "Vendor Package Review Punchlist DR90",
         "output_file": "Punch_DR90_Vendors.xlsx",
         "colunas": [
             "Punch No", "Zone", "DECK No.", "Zone-Punch Number", "Action Description", "S3D Item Tags",

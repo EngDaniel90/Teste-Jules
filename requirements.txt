@@ -1,0 +1,8 @@
+requests
+pandas
+matplotlib
+seaborn
+pywin32
+selenium
+urllib3
+xlsxwriter
