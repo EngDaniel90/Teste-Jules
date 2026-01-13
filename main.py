@@ -2,13 +2,11 @@
 import os
 import sys
 import time
-import shutil
 import traceback
 import urllib3
-import urllib.request
 import requests
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -38,6 +36,7 @@ os.makedirs(PASTA_TEMP, exist_ok=True)
 LISTAS_SHAREPOINT = {
     "TS": {
         "url": "https://seatrium.sharepoint.com/sites/P84P85DesignReview/Lists/P8485_TOPSIDE_DR90_Punch_List/Updated%20View.aspx",
+        "base_site_url": "https://seatrium.sharepoint.com/sites/P84P85DesignReview",
         "api_name": "P84/85_TOPSIDE_DR90_Punch_List",
         "output_file": "Punch_DR90_TS.xlsx",
         "colunas": [
@@ -56,6 +55,7 @@ LISTAS_SHAREPOINT = {
     },
     "E-House": {
         "url": "https://seatrium.sharepoint.com/:l:/r/sites/P84P85DesignReview/Lists/DR90%20EHouse%20Punchlist?e=QCVEQf",
+        "base_site_url": "https://seatrium.sharepoint.com/sites/P84P85DesignReview",
         "api_name": "DR90 EHouse Punchlist",
         "output_file": "Punch_DR90_E-House.xlsx",
         "colunas": [
@@ -74,6 +74,7 @@ LISTAS_SHAREPOINT = {
     },
     "Vendors": {
         "url": "https://seatrium.sharepoint.com/sites/P84P85DesignReview/Lists/Vendor%20Package%20Review%20Punchlist%20DR90/AllItems.aspx?e=4tHLty&CID=43904b9e%2D7cb2%2D481c%2Db136%2D5285ae014bd9&ovuser=5b6f6241%2D9a57%2D4be4%2D8e50%2D1dfa72e79a57%2Cleojunqueira%40petrobras%2Ecom%2Ebr",
+        "base_site_url": "https://seatrium.sharepoint.com/sites/P84P85DesignReview",
         "api_name": "Vendor Package Review Punchlist DR90",
         "output_file": "Punch_DR90_Vendors.xlsx",
         "colunas": [
@@ -90,16 +91,10 @@ LISTAS_SHAREPOINT = {
 }
 
 # --- CAMINHOS DINÂMICOS ---
-PATH_PUNCH_TS = os.path.join(PASTA_RAIZ, LISTAS_SHAREPOINT["TS"]["output_file"])
-PATH_PUNCH_EHOUSE = os.path.join(PASTA_RAIZ, LISTAS_SHAREPOINT["E-House"]["output_file"])
-PATH_PUNCH_VENDORS = os.path.join(PASTA_RAIZ, LISTAS_SHAREPOINT["Vendors"]["output_file"])
 PATH_RDS = os.path.join(PASTA_TEMP, 'RDs', 'RDs.xlsx')
-PATH_DASHBOARD_IMG = os.path.join(PASTA_TEMP, 'dashboard_status.png')
 PATH_OP_CHECK = os.path.join(PASTA_TEMP, 'Operation to check.xlsx')
 PATH_ESUP_CHECK = os.path.join(PASTA_TEMP, 'ESUP to check.xlsx')
 PATH_JULIUS_CHECK = os.path.join(PASTA_TEMP, 'Julius to check.xlsx')
-PATH_EHOUSE_GRAPH = os.path.join(PASTA_TEMP, "ehouse_status_graph.png")
-PATH_VENDORS_GRAPH = os.path.join(PASTA_TEMP, "vendors_status_graph.png")
 PATH_FECHAMENTO_OPERACAO_GRAPH = os.path.join(PASTA_TEMP, "fechamento_operacao_por_dia.png")
 CAMINHO_DRIVER_FIXO = r"C:\Users\E797\PycharmProjects\pythonProject\msedgedriver.exe"
 
@@ -107,49 +102,36 @@ CAMINHO_DRIVER_FIXO = r"C:\Users\E797\PycharmProjects\pythonProject\msedgedriver
 EMAIL_DESTINO_TEAMS = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
 
-# --- FUNÇÕES DE ANÁLISE ---
-def processar_dados_ehouse(log_ext):
+# --- FUNÇÕES DE ANÁLISE E RELATÓRIO ---
+def processar_dados_geral(log_ext, path_planilha):
     log = list(log_ext)
     try:
-        if not os.path.exists(PATH_PUNCH_EHOUSE):
-            raise FileNotFoundError(f"Arquivo E-House não encontrado: {PATH_PUNCH_EHOUSE}")
-        df_ehouse = pd.read_excel(PATH_PUNCH_EHOUSE)
-        df_ehouse.columns = df_ehouse.columns.str.strip()
-        pending_petrobras = df_ehouse[df_ehouse['Status'].str.strip() == 'Pending Petrobras'].copy()
-        disciplina_counts = pending_petrobras['Petrobras Discipline'].value_counts().to_dict()
-        resultados = {"total_pending": len(pending_petrobras), "disciplina_counts": disciplina_counts}
-        log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Processamento E-House concluído.")
-        return resultados, log, True
-    except Exception as e:
-        log.append(f"ERRO CRÍTICO em E-House: {traceback.format_exc()}")
-        return None, log, False
+        if not os.path.exists(path_planilha):
+            raise FileNotFoundError(f"Arquivo não encontrado: {path_planilha}")
 
-def processar_dados_vendors(log_ext):
-    log = list(log_ext)
-    try:
-        if not os.path.exists(PATH_PUNCH_VENDORS):
-            raise FileNotFoundError(f"Arquivo Vendors não encontrado: {PATH_PUNCH_VENDORS}")
-        df_vendors = pd.read_excel(PATH_PUNCH_VENDORS)
-        df_vendors.columns = df_vendors.columns.str.strip()
-        pending_petrobras = df_vendors[df_vendors['Status'].str.strip() == 'Pending Petrobras'].copy()
-        disciplina_counts = pending_petrobras['Petrobras Discipline'].value_counts().to_dict()
+        df = pd.read_excel(path_planilha)
+        df.columns = df.columns.str.strip()
+
+        pending_petrobras = df[df['Status'].str.strip() == 'Pending Petrobras'].copy()
+        disciplina_counts = pending_petrobras.get('Petrobras Discipline', pd.Series(dtype=str)).value_counts().to_dict()
+
         resultados = {
+            "total_punches": len(df),
             "total_pending": len(pending_petrobras),
-            "disciplina_counts": disciplina_counts,
-            "total_punches": len(df_vendors)
+            "disciplina_counts": disciplina_counts
         }
-        log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Processamento Vendors concluído.")
+        log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Processamento de '{os.path.basename(path_planilha)}' concluído.")
         return resultados, log, True
     except Exception as e:
-        log.append(f"ERRO CRÍTICO em Vendors: {traceback.format_exc()}")
+        log.append(f"ERRO CRÍTICO em '{os.path.basename(path_planilha)}': {traceback.format_exc()}")
         return None, log, False
 
-def processar_dados(log_ext):
+def processar_dados_ts(log_ext, path_planilha):
     log = list(log_ext)
     try:
-        if not os.path.exists(PATH_PUNCH_TS): raise FileNotFoundError(f"Arquivo não encontrado: {PATH_PUNCH_TS}")
+        if not os.path.exists(path_planilha): raise FileNotFoundError(f"Arquivo não encontrado: {path_planilha}")
         if not os.path.exists(PATH_RDS): raise FileNotFoundError(f"Arquivo RDs não encontrado: {PATH_RDS}")
-        df = pd.read_excel(PATH_PUNCH_TS)
+        df = pd.read_excel(path_planilha)
         df.columns = df.columns.str.strip()
         df_rds = pd.read_excel(PATH_RDS)
         df_rds.columns = df_rds.columns.str.strip()
@@ -192,7 +174,7 @@ def processar_dados(log_ext):
         log.append(f"ERRO CRÍTICO em TS: {traceback.format_exc()}")
         return None, log, False
 
-def gerar_dashboard_imagem(dados, log_ext):
+def gerar_dashboard_ts(dados, log_ext, path_imagem):
     log = list(log_ext)
     try:
         total_punches = dados['total_punches']
@@ -215,7 +197,7 @@ def gerar_dashboard_imagem(dados, log_ext):
         else:
             ax2.text(0.5, 0.5, 'Sem dados para exibir', ha='center', va='center', fontsize=14)
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        plt.savefig(PATH_DASHBOARD_IMG, dpi=200, bbox_inches='tight')
+        plt.savefig(path_imagem, dpi=200, bbox_inches='tight')
         plt.close()
         log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard TS gerado.")
         return True, log
@@ -232,8 +214,8 @@ def gerar_grafico_fechamento_operacao(dados, log_ext):
             return True, log
         start_date = fechamentos_diarios.index.min()
         end_date = datetime.now().date()
-        date_range = pd.date_range(start=start_date, end=end_date, freq='D').date
-        fechamentos_completos = fechamentos_diarios.reindex(date_range, fill_value=0)
+        date_range = pd.date_range(start=start_date, end=end_date, freq='D')
+        fechamentos_completos = fechamentos_diarios.reindex(date_range.date, fill_value=0)
         sns.set_style("whitegrid")
         plt.figure(figsize=(15, 8))
         ax = sns.barplot(x=fechamentos_completos.index, y=fechamentos_completos.values, color="#3498db")
@@ -241,7 +223,7 @@ def gerar_grafico_fechamento_operacao(dados, log_ext):
         ax.set_xlabel('Data', fontsize=12)
         ax.set_ylabel('Quantidade de Itens Fechados', fontsize=12)
         plt.xticks(rotation=45, ha='right')
-        ax.xaxis.set_major_formatter(plt.FixedFormatter([d.strftime('%d/%m/%Y') for d in fechamentos_completos.index]))
+        ax.xaxis.set_major_formatter(plt.FixedFormatter(fechamentos_completos.index.strftime('%d/%m/%Y')))
         for p in ax.patches:
             if p.get_height() > 0:
                  ax.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='bottom', fontsize=11)
@@ -254,81 +236,58 @@ def gerar_grafico_fechamento_operacao(dados, log_ext):
         log.append(f"ERRO ao gerar gráfico de fechamento: {traceback.format_exc()}")
         return False, log
 
-def gerar_grafico_ehouse(dados, log_ext):
+def gerar_grafico_disciplinas(dados, log_ext, path_imagem, titulo):
     log = list(log_ext)
     try:
-        disciplinas = dados['disciplina_counts']
+        disciplinas = dados.get('disciplina_counts', {})
         if not disciplinas:
-            log.append("Nenhum dado de E-House para gerar gráfico.")
+            log.append(f"Nenhum dado de disciplina para gerar gráfico '{titulo}'.")
             return True, log
+
         sns.set_style("whitegrid")
         plt.figure(figsize=(12, 8))
         disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
-        ax = sns.barplot(x=[k for k, v in disciplinas_sorted], y=[v for k, v in disciplinas_sorted], palette="Blues_r")
-        ax.set_title('Status Punch E-House: Pendentes Petrobras por Disciplina', fontsize=18, fontweight='bold')
+
+        ax = sns.barplot(x=[k for k, v in disciplinas_sorted], y=[v for k, v in disciplinas_sorted], palette="viridis")
+        ax.set_title(titulo, fontsize=18, fontweight='bold')
+        ax.set_xlabel('Disciplina', fontsize=12)
+        ax.set_ylabel('Quantidade de Itens Pendentes', fontsize=12)
         plt.xticks(rotation=45, ha='right')
+
         for p in ax.patches:
-            ax.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='center', xytext=(0, 5), textcoords='offset points')
+            ax.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()), ha='center', va='bottom', fontsize=11)
+
         plt.tight_layout()
-        plt.savefig(PATH_EHOUSE_GRAPH, dpi=200, bbox_inches='tight')
+        plt.savefig(path_imagem, dpi=200, bbox_inches='tight')
         plt.close()
-        log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Gráfico E-House gerado.")
+        log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Gráfico '{titulo}' gerado com sucesso.")
         return True, log
     except Exception as e:
-        log.append(f"ERRO ao gerar gráfico E-House: {traceback.format_exc()}")
+        log.append(f"ERRO ao gerar gráfico '{titulo}': {traceback.format_exc()}")
         return False, log
 
-def gerar_dashboard_vendors(dados, log_ext):
+def enviar_email_geral(dados, log_ext, path_grafico, titulo_email, titulo_corpo):
     log = list(log_ext)
-    try:
-        total_punches, pending_reply, disciplinas = dados['total_punches'], dados.get('total_pending', 0), dados['disciplina_counts']
-        sns.set_style("whitegrid")
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 2]})
-        fig.suptitle('Status Report - Vendor Packages DR90', fontsize=24, fontweight='bold', color="#2E8B57")
-        sns.barplot(x=['Total de Itens', 'Pendentes (PB)'], y=[total_punches, pending_reply], palette=["#2E8B57", "#FFD700"], ax=ax1, width=0.5)
-        if disciplinas:
-            disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
-            sns.barplot(x=[v for k, v in disciplinas_sorted], y=[k for k, v in disciplinas_sorted], palette="crest", ax=ax2, orient='h')
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        plt.savefig(PATH_VENDORS_GRAPH, dpi=200, bbox_inches='tight')
-        plt.close()
-        log.append(f"[{datetime.now().strftime('%H:%M:%S')}] Dashboard de Vendors gerado.")
-        return True, log
-    except Exception as e:
-        log.append(f"ERRO ao gerar dashboard de Vendors: {traceback.format_exc()}")
-        return False, log
-
-def enviar_email_ehouse(dados):
-    if dados is None or dados.get("total_pending", 0) == 0: return
+    if dados is None or dados.get("total_pending", 0) == 0:
+        log.append(f"Nenhum item pendente para '{titulo_corpo}'. E-mail não enviado.")
+        return log
     try:
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
         mail.Importance = 2
         mail.To = EMAIL_DESTINO_TEAMS
-        mail.Subject = f"Status Punch E-House - {datetime.now().strftime('%d/%m/%Y')}"
+        mail.Subject = f"{titulo_email} - {datetime.now().strftime('%d/%m/%Y')}"
         disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
-        mail.HTMLBody = f"""<p>Segue a atualização de status da <b>Punch List E-House</b>:</p><p>Atualmente, temos <b style='color: #c00000;'>{dados['total_pending']}</b> itens com status <b>Pending Petrobras</b>.</p><p><b>Detalhamento por Disciplina:</b></p><ul>{disciplinas_html}</ul><p><i>O gráfico de status está anexado.</i></p>"""
-        if os.path.exists(PATH_EHOUSE_GRAPH): mail.Attachments.Add(PATH_EHOUSE_GRAPH)
+        mail.HTMLBody = f"""<p>Prezados,</p><p>Segue a atualização de status da <b>{titulo_corpo}</b>:</p><p>Atualmente, temos <b style='color: #c00000;'>{dados['total_pending']}</b> itens com status <b>Pending Petrobras</b>.</p><p><b>Detalhamento por Disciplina:</b></p><ul>{disciplinas_html}</ul><p><i>O gráfico de status está anexado.</i></p>"""
+        if os.path.exists(path_grafico):
+            mail.Attachments.Add(path_grafico)
         mail.Send()
+        log.append(f"E-mail para '{titulo_corpo}' enviado com sucesso.")
     except Exception as e:
-        print(f"ERRO ao enviar e-mail de E-House: {e}")
+        log.append(f"ERRO ao enviar e-mail para '{titulo_corpo}': {traceback.format_exc()}")
+    return log
 
-def enviar_email_vendors(dados):
-    if dados is None or dados.get("total_pending", 0) == 0: return
-    try:
-        outlook = win32.Dispatch('outlook.application')
-        mail = outlook.CreateItem(0)
-        mail.Importance = 2
-        mail.To = EMAIL_DESTINO_TEAMS
-        mail.Subject = f"Status Punch Vendors - {datetime.now().strftime('%d/%m/%Y')}"
-        disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
-        mail.HTMLBody = f"""<p>Segue a atualização de status da <b>Punch List de Vendors (Fornecedores)</b>:</p><p>Temos <b style='color: #c00000;'>{dados['total_pending']}</b> itens com status <b>Pending Petrobras</b>.</p><p><b>Detalhamento por Disciplina:</b></p><ul>{disciplinas_html}</ul><p><i>O dashboard está anexado.</i></p>"""
-        if os.path.exists(PATH_VENDORS_GRAPH): mail.Attachments.Add(PATH_VENDORS_GRAPH)
-        mail.Send()
-    except Exception as e:
-        print(f"ERRO ao enviar e-mail de Vendors: {e}")
-
-def enviar_email_principal(dados, log_processo):
+def enviar_email_principal(dados, log_processo, path_dashboard_ts):
     try:
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
@@ -336,7 +295,7 @@ def enviar_email_principal(dados, log_processo):
         mail.To = EMAIL_DESTINO_TEAMS
         mail.Subject = f"Status Report: Punch List DR90 TS - {datetime.now().strftime('%d/%m/%Y')}"
 
-        if os.path.exists(PATH_DASHBOARD_IMG): mail.Attachments.Add(PATH_DASHBOARD_IMG)
+        if os.path.exists(path_dashboard_ts): mail.Attachments.Add(path_dashboard_ts)
         if os.path.exists(PATH_FECHAMENTO_OPERACAO_GRAPH): mail.Attachments.Add(PATH_FECHAMENTO_OPERACAO_GRAPH)
 
         df_op_check = dados.get("df_op_check")
@@ -383,7 +342,6 @@ def enviar_email_principal(dados, log_processo):
         </body></html>"""
 
         mail.Send()
-
     except Exception as e:
         print(f"ERRO ao enviar e-mail principal: {traceback.format_exc()}")
 
@@ -462,18 +420,14 @@ class AutomacaoPunchList:
         colunas_presentes = [c for c in colunas_desejadas if c in df.columns]
         df = df[colunas_presentes].copy()
 
-        for col in df.columns:
-            # Força a conversão para string e remove erros
-            if df[col].dtype == 'object':
-                 df.loc[:, col] = df[col].astype(str).str.replace("error", "", case=False)
+        for col in [c for c in df.columns if "Date" in c]:
+            df[col] = pd.to_datetime(df[col], format='%Y-%m-%dT%H:%M:%SZ', errors='coerce').dt.strftime('%d/%m/%Y')
 
-            # Otimiza a conversão de data
-            if "Date" in col:
-                df.loc[:, col] = pd.to_datetime(df[col], errors='coerce', format='%Y-%m-%dT%H:%M:%SZ').dt.strftime('%d/%m/%Y')
+        for col in df.select_dtypes(include=['object']).columns:
+            df[col] = df[col].astype(str).str.replace("error", "", case=False).fillna('')
 
-        # Limpeza final de valores nulos de forma mais robusta
-        df.replace(['NaT', 'nan', 'None', ''], pd.NA, inplace=True)
-        df.fillna("", inplace=True)
+        df.replace(['NaT', 'nan', 'None'], '', inplace=True)
+
         return df
 
     def obter_mapeamento_colunas(self, session, base_url, nome_lista, api_name):
@@ -500,23 +454,31 @@ class AutomacaoPunchList:
 
     def extrair_dados_de_lista(self, session, nome_lista, config):
         self.registrar_log(f"Extraindo dados para: {nome_lista}")
-        base_site_url = "/".join(config["url"].split("/")[:5])
-        self.obter_mapeamento_colunas(session, base_site_url, nome_lista, config["api_name"])
-        endpoint = f"{base_site_url}/_api/web/lists/getbytitle('{config['api_name']}')/items?$top=5000"
         try:
+            base_site_url = config["base_site_url"]
+            if not self.mapeamentos_colunas.get(nome_lista):
+                self.obter_mapeamento_colunas(session, base_site_url, nome_lista, config["api_name"])
+
+            endpoint = f"{base_site_url}/_api/web/lists/getbytitle('{config['api_name']}')/items?$top=5000"
             response = session.get(endpoint, headers={"Accept": "application/json;odata=verbose"}, timeout=60)
+
             if response.status_code == 200:
                 results = response.json().get('d', {}).get('results', [])
                 if not results:
-                    self.registrar_log(f"A lista '{nome_lista}' retornou vazia.")
+                    self.registrar_log(f"AVISO: A lista '{nome_lista}' retornou vazia.")
+                    df_vazio = pd.DataFrame(columns=config["colunas"])
+                    self.salvar_excel(df_vazio, os.path.join(PASTA_RAIZ, config["output_file"]))
                     return True
+
                 df_raw = pd.json_normalize(results)
                 df_final = self.tratar_dados(df_raw, nome_lista)
-                self.salvar_excel(df_final, os.path.join(PASTA_RAIZ, config["output_file"]))
-                return True
+                return self.salvar_excel(df_final, os.path.join(PASTA_RAIZ, config["output_file"]))
+            else:
+                self.registrar_log(f"ERRO de API ao extrair '{nome_lista}': Status {response.status_code} - {response.text[:200]}")
+                return False
         except Exception as e:
-            self.registrar_log(f"Erro na extração de '{nome_lista}': {e}")
-        return False
+            self.registrar_log(f"ERRO CRÍTICO na extração de '{nome_lista}': {traceback.format_exc()}")
+            return False
 
     def ciclo_de_download(self):
         self.registrar_log("Iniciando ciclo de download...")
@@ -527,42 +489,66 @@ class AutomacaoPunchList:
             for cookie in cookies:
                 session.cookies.set(cookie['name'], cookie['value'])
             for nome, config in LISTAS_SHAREPOINT.items():
-                if "[URL_SHAREPOINT" in config["url"]:
-                    self.registrar_log(f"Pulando '{nome}' (URL não configurada).")
+                if not config.get("base_site_url"):
+                    self.registrar_log(f"Pulando '{nome}' (URL base não configurada).")
                     continue
                 if not self.extrair_dados_de_lista(session, nome, config):
                     sucesso_total = False
         return sucesso_total
 
     def executar_analises(self):
-        self.registrar_log("--- INICIANDO ANÁLISES ---")
-        dados_ts, log_ts, sucesso_ts = processar_dados(self.log_sessao)
+        self.registrar_log("--- INICIANDO ROTINAS DE ANÁLISE E ENVIO ---")
+        hora_atual = datetime.now().hour
+
+        # --- FLUXO 1: Relatório Principal (Topside) ---
+        self.registrar_log("\n--- [FLUXO 1/3] Processando Relatório Principal (Topside) ---")
+        path_ts = os.path.join(PASTA_RAIZ, LISTAS_SHAREPOINT['TS']['output_file'])
+        dados_ts, log_ts, sucesso_ts = processar_dados_ts(self.log_sessao, path_ts)
         self.log_sessao = log_ts
         if sucesso_ts:
-            sucesso_dash, log_dash = gerar_dashboard_imagem(dados_ts, self.log_sessao)
+            path_dashboard_ts = os.path.join(PASTA_TEMP, 'ts_dashboard.png')
+            sucesso_dash, log_dash = gerar_dashboard_ts(dados_ts, self.log_sessao, path_dashboard_ts)
             self.log_sessao = log_dash
+
             sucesso_fech, log_fech = gerar_grafico_fechamento_operacao(dados_ts, self.log_sessao)
             self.log_sessao = log_fech
-            enviar_email_principal(dados_ts, self.log_sessao)
-            if self.primeira_execucao_do_dia or (7 <= datetime.now().hour < 9):
+
+            enviar_email_principal(dados_ts, self.log_sessao, path_dashboard_ts)
+
+            if self.primeira_execucao_do_dia or (7 <= hora_atual < 9):
                 enviar_mensagem_julius(dados_ts)
         else:
             enviar_email_de_falha(self.log_sessao)
 
-        if self.primeira_execucao_do_dia or datetime.now().hour in [8, 12, 17]:
-            dados_eh, log_eh, sucesso_eh = processar_dados_ehouse(self.log_sessao)
+        # --- FLUXOS 2 & 3: E-House e Vendors (agendados) ---
+        if self.primeira_execucao_do_dia or hora_atual in [8, 12, 17]:
+            # Análise E-House
+            self.registrar_log("\n--- [FLUXO 2/3] Processando Relatório E-House ---")
+            path_ehouse = os.path.join(PASTA_RAIZ, LISTAS_SHAREPOINT['E-House']['output_file'])
+            path_grafico_ehouse = os.path.join(PASTA_TEMP, 'ehouse_status_graph.png')
+            dados_eh, log_eh, sucesso_eh = processar_dados_geral(self.log_sessao, path_ehouse)
             self.log_sessao = log_eh
             if sucesso_eh:
-                sucesso_graph_eh, log_graph_eh = gerar_grafico_ehouse(dados_eh, self.log_sessao)
-                self.log_sessao = log_graph_eh
-                if sucesso_graph_eh: enviar_email_ehouse(dados_eh)
+                sucesso_graph, log_graph = gerar_grafico_disciplinas(dados_eh, self.log_sessao, path_grafico_ehouse, "Status Punch E-House: Pendentes por Disciplina")
+                self.log_sessao = log_graph
+                if sucesso_graph:
+                    self.log_sessao = enviar_email_geral(dados_eh, self.log_sessao, path_grafico_ehouse, "Status Punch E-House", "Punch List E-House")
+            else:
+                enviar_email_de_falha(self.log_sessao)
 
-            dados_ven, log_ven, sucesso_ven = processar_dados_vendors(self.log_sessao)
+            # Análise Vendors
+            self.registrar_log("\n--- [FLUXO 3/3] Processando Relatório Vendors ---")
+            path_vendors = os.path.join(PASTA_RAIZ, LISTAS_SHAREPOINT['Vendors']['output_file'])
+            path_grafico_vendors = os.path.join(PASTA_TEMP, 'vendors_status_graph.png')
+            dados_ven, log_ven, sucesso_ven = processar_dados_geral(self.log_sessao, path_vendors)
             self.log_sessao = log_ven
             if sucesso_ven:
-                sucesso_dash_ven, log_dash_ven = gerar_dashboard_vendors(dados_ven, self.log_sessao)
-                self.log_sessao = log_dash_ven
-                if sucesso_dash_ven: enviar_email_vendors(dados_ven)
+                sucesso_graph, log_graph = gerar_grafico_disciplinas(dados_ven, self.log_sessao, path_grafico_vendors, "Status Punch Vendors: Pendentes por Disciplina")
+                self.log_sessao = log_graph
+                if sucesso_graph:
+                    self.log_sessao = enviar_email_geral(dados_ven, self.log_sessao, path_grafico_vendors, "Status Punch Vendors", "Punch List de Vendors")
+            else:
+                enviar_email_de_falha(self.log_sessao)
 
     def iniciar(self):
         if self.iniciar_sessao_navegador():
@@ -582,4 +568,5 @@ class AutomacaoPunchList:
             self.enviar_log_geral(False)
 
 if __name__ == "__main__":
-    AutomacaoPunchList().iniciar()
+    automacao = AutomacaoPunchList()
+    automacao.iniciar()
