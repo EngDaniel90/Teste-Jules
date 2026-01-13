@@ -27,7 +27,7 @@ os.environ['WDM_SSL_VERIFY'] = '0'
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- CONFIGURAÇÕES DO AMBIENTE ---
-URL_LOGIN_SEATRIUM = "https://seatrium.sharepoint.com/:l:/r/sites/P84P85DesignReview/Lists/DR90%20EHouse%20Punchlist?e=Is2qGr"
+URL_LOGIN_SEATRIUM = "https://seatrium.sharepoint.com/sites/P84P85DesignReview/Lists/DR90%20EHouse%20Punchlist/AllItems.aspx?e=bTNUys&CID=98bfe3a1%2D508a%2D6000%2D2c51%2D857abb203708&cidOR=SPO&ovuser=5b6f6241%2D57be4%2D8e50%2D1dfa72e79a57%2Cdaniel%2Eanversi%40petrobras%2Ecom%2Ebr&OR=Teams%2DHL&CT=1766373503454&clickparams=eyJBcHBOYW1lIjoiVGVhbXMtRGVza3RvcCIsIkFwcFZlcnNpb24iOiI0OS8yNTExMzAwMTMxMiIsIkhhc0ZlZGVyYXRlZFVzZXIiOnRydWV9"
 URL_BASE_SHAREPOINT = "https://seatrium.sharepoint.com/sites/P84P85DesignReview"
 
 PASTA_DESTINO = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches"
