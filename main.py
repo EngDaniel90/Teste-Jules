@@ -482,7 +482,6 @@ class AutomacaoPunchList:
         try:
             service = EdgeService(executable_path=CAMINHO_DRIVER_FIXO)
             options = Options()
-            options.add_argument("--headless")
             self.driver = webdriver.Edge(service=service, options=options)
             self.driver.get(LISTAS_SHAREPOINT["TS"]["url"])
             WebDriverWait(self.driver, 180).until(EC.presence_of_element_located((By.CSS_SELECTOR, "[role='grid']")))
