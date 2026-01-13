@@ -441,32 +441,39 @@ class AutomacaoPunchList:
         except Exception as e:
             self.registrar_log(f"Falha ao enviar log geral: {e}")
 
-    def salvar_excel_com_tabela(self, df, caminho_arquivo):
+    def salvar_excel(self, df, caminho_arquivo):
         try:
-            with pd.ExcelWriter(caminho_arquivo, engine='xlsxwriter') as writer:
-                df.to_excel(writer, sheet_name='Dados', index=False)
-                worksheet = writer.sheets['Dados']
-                (max_row, max_col) = df.shape
-                worksheet.add_table(0, 0, max_row, max_col - 1, {'columns': [{'header': col} for col in df.columns]})
-                for i, col in enumerate(df.columns):
-                    width = max(df[col].astype(str).map(len).max(), len(col)) + 2
-                    worksheet.set_column(i, i, width)
+            df.to_excel(caminho_arquivo, index=False)
+            self.registrar_log(f"Planilha salva com sucesso em: {caminho_arquivo}")
             return True
+        except PermissionError:
+            self.registrar_log(f"ERRO DE PERMISSÃO: O arquivo '{caminho_arquivo}' está aberto. Feche-o para salvar.")
+            return False
         except Exception as e:
-            self.registrar_log(f"ERRO ao salvar '{caminho_arquivo}' como tabela: {e}")
+            self.registrar_log(f"ERRO ao salvar '{caminho_arquivo}': {e}")
             return False
 
     def tratar_dados(self, df, nome_lista):
         mapeamento = self.mapeamentos_colunas.get(nome_lista, {})
-        if mapeamento: df = df.rename(columns=mapeamento)
+        if mapeamento:
+            df = df.rename(columns=mapeamento)
+
         colunas_desejadas = LISTAS_SHAREPOINT[nome_lista]["colunas"]
-        df = df[[c for c in colunas_desejadas if c in df.columns]].copy()
+        colunas_presentes = [c for c in colunas_desejadas if c in df.columns]
+        df = df[colunas_presentes].copy()
+
         for col in df.columns:
+            # Força a conversão para string e remove erros
             if df[col].dtype == 'object':
-                df[col] = df[col].astype(str).str.replace(r"error", "", case=False, regex=True)
+                 df.loc[:, col] = df[col].astype(str).str.replace("error", "", case=False)
+
+            # Otimiza a conversão de data
             if "Date" in col:
-                df[col] = pd.to_datetime(df[col], errors='coerce').dt.strftime('%d/%m/%Y')
-        df.replace(['NaT', 'nan', 'None'], "", inplace=True)
+                df.loc[:, col] = pd.to_datetime(df[col], errors='coerce', format='%Y-%m-%dT%H:%M:%SZ').dt.strftime('%d/%m/%Y')
+
+        # Limpeza final de valores nulos de forma mais robusta
+        df.replace(['NaT', 'nan', 'None', ''], pd.NA, inplace=True)
+        df.fillna("", inplace=True)
         return df
 
     def obter_mapeamento_colunas(self, session, base_url, nome_lista, api_name):
@@ -505,7 +512,7 @@ class AutomacaoPunchList:
                     return True
                 df_raw = pd.json_normalize(results)
                 df_final = self.tratar_dados(df_raw, nome_lista)
-                self.salvar_excel_com_tabela(df_final, os.path.join(PASTA_RAIZ, config["output_file"]))
+                self.salvar_excel(df_final, os.path.join(PASTA_RAIZ, config["output_file"]))
                 return True
         except Exception as e:
             self.registrar_log(f"Erro na extração de '{nome_lista}': {e}")
