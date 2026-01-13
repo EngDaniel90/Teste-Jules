@@ -17,8 +17,58 @@ PATH_EHOUSE_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_
 PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
 PATH_VENDORS_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_Vendors.xlsx"
 PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
+PATH_LAST_RUN = r'C:\Users\E797\Downloads\Teste mensagem e print\last_run.txt'
+PATH_FECHAMENTO_GRAPH = r'C:\Users\E797\Downloads\Teste mensagem e print\fechamento_operacao.png'
 EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
+SCHEDULED_HOURS = [7, 12, 18]
+
+
+def deve_executar():
+    """
+    Verifica se a automação deve ser executada com base no horário e na data da última execução.
+    """
+    hoje = datetime.now().date()
+    hora_atual = datetime.now().hour
+
+    # Verifica se o arquivo de última execução existe
+    if not os.path.exists(PATH_LAST_RUN):
+        print("Arquivo de última execução não encontrado. Executando pela primeira vez.")
+        return True
+
+    # Lê a data da última execução
+    with open(PATH_LAST_RUN, 'r') as f:
+        try:
+            ultima_execucao_str = f.read().strip()
+            ultima_execucao_data = datetime.strptime(ultima_execucao_str, '%Y-%m-%d').date()
+        except (ValueError, IndexError):
+            print("Formato de data inválido no arquivo last_run.txt. Executando.")
+            return True
+
+    # 1. Lógica de primeira execução do dia
+    if ultima_execucao_data < hoje:
+        print(f"Primeira execução do dia ({hoje}). Ignorando horários agendados.")
+        return True
+
+    # 2. Lógica para execuções subsequentes no mesmo dia
+    if hora_atual in SCHEDULED_HOURS:
+        print(f"Executando dentro do horário agendado: {hora_atual}h.")
+        return True
+
+    print(f"Fora do horário agendado ({hora_atual}h) e não é a primeira execução do dia. Aguardando...")
+    return False
+
+
+def registrar_execucao():
+    """
+    Registra a data e hora da execução atual no arquivo de controle.
+    """
+    try:
+        with open(PATH_LAST_RUN, 'w') as f:
+            f.write(datetime.now().strftime('%Y-%m-%d'))
+        print("Data da execução registrada com sucesso.")
+    except Exception as e:
+        print(f"ERRO ao registrar a data de execução: {e}")
 
 
 def processar_dados_ehouse():
@@ -193,7 +243,8 @@ def processar_dados():
             "mencoes_rds": " ".join(sorted(list(set(mencoes_rds)))),
             "df_op_check": df_op_check,
             "df_esup_check": df_esup_check,
-            "df_julius_check": df_julius_check
+            "df_julius_check": df_julius_check,
+            "df_full": df
         }
 
         log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processamento de dados concluído.")
@@ -378,65 +429,103 @@ def enviar_email_ehouse(dados):
         print(f"ERRO CRÍTICO ao enviar e-mail de E-House: {str(e)}\n{erro_detalhado}")
 
 
-def gerar_dashboard_vendors(dados):
+def gerar_grafico_vendors(dados):
     """
-    Gera uma imagem de dashboard para o status de Vendors.
+    Gera um gráfico de barras vertical para o status de Vendors.
     """
     log = []
     try:
-        total_punches = dados['total_punches']
-        pending_reply = dados.get('total_pending', 0)
         disciplinas = dados['disciplina_counts']
+        if not disciplinas:
+            log.append("Nenhum dado de Vendors para gerar gráfico.")
+            return True, log
 
         sns.set_style("whitegrid")
         plt.rcParams['font.family'] = 'sans-serif'
         plt.rcParams['font.sans-serif'] = 'Calibri'
+        cor_principal = "#2E8B57"
 
-        cor_principal = "#2E8B57"  # Verde Mar
-        cor_destaque = "#FFD700"  # Dourado
+        plt.figure(figsize=(12, 8))
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 2]})
-        fig.suptitle('Status Report - Vendor Packages DR90', fontsize=24, fontweight='bold', color=cor_principal)
+        disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
+        nomes_disciplinas = [item[0] for item in disciplinas_sorted]
+        valores_disciplinas = [item[1] for item in disciplinas_sorted]
 
-        ax1.set_title('Visão Geral dos Itens', fontsize=16, fontweight='bold')
-        sns.barplot(x=['Total de Itens', 'Pendentes (PB)'], y=[total_punches, pending_reply],
-                    palette=[cor_principal, cor_destaque], ax=ax1, width=0.5, hue=['Total de Itens', 'Pendentes (PB)'],
-                    legend=False)
-        ax1.set_ylabel('Quantidade', fontsize=12)
-        ax1.grid(axis='y', linestyle='--', alpha=0.7)
+        ax = sns.barplot(x=nomes_disciplinas, y=valores_disciplinas, palette="Greens_r")
 
-        for p in ax1.patches:
-            ax1.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()),
-                         ha='center', va='center', fontsize=14, color='black', xytext=(0, 10),
-                         textcoords='offset points')
+        ax.set_title('Status Punch Vendors: Pendentes Petrobras por Disciplina', fontsize=18, fontweight='bold')
+        ax.set_xlabel('Disciplina', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Quantidade de Itens', fontsize=12, fontweight='bold')
+        plt.xticks(rotation=45, ha='right')
 
-        if disciplinas:
-            disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
-            nomes_disciplinas = [item[0] for item in disciplinas_sorted]
-            valores_disciplinas = [item[1] for item in disciplinas_sorted]
-            ax2.set_title('Pendências por Disciplina', fontsize=16, fontweight='bold')
-            sns.barplot(x=valores_disciplinas, y=nomes_disciplinas, palette="crest", ax=ax2, orient='h',
-                        hue=nomes_disciplinas, legend=False)
-            ax2.set_xlabel('Quantidade de Itens Pendentes', fontsize=12)
-            ax2.grid(axis='x', linestyle='--', alpha=0.7)
-            for index, value in enumerate(valores_disciplinas):
-                ax2.text(value, index, f' {value}', va='center', fontsize=12, color='black')
-        else:
-            ax2.set_title('Nenhuma Pendência por Disciplina', fontsize=16, fontweight='bold')
-            ax2.text(0.5, 0.5, 'Sem dados para exibir', ha='center', va='center', fontsize=14)
-            ax2.set_xticks([]);
-            ax2.set_yticks([])
+        for p in ax.patches:
+            ax.annotate(f'{int(p.get_height())}',
+                        (p.get_x() + p.get_width() / 2., p.get_height()),
+                        ha='center', va='center', fontsize=11, color='black', xytext=(0, 5),
+                        textcoords='offset points')
 
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.tight_layout()
         plt.savefig(PATH_VENDORS_GRAPH, dpi=200, bbox_inches='tight')
         plt.close()
 
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dashboard de Vendors gerado com sucesso.")
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico de Vendors gerado com sucesso.")
         return True, log
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
-        log.append(f"ERRO CRÍTICO ao gerar dashboard de Vendors: {str(e)}\n{erro_detalhado}")
+        log.append(f"ERRO CRÍTICO ao gerar gráfico de Vendors: {str(e)}\n{erro_detalhado}")
+        return False, log
+
+
+def gerar_grafico_fechamento_operacao(df):
+    """
+    Gera um gráfico de barras mostrando a quantidade de itens que a operação fechou por dia.
+    """
+    log = []
+    try:
+        df_cleaned = df.dropna(subset=['Date Cleared by Petrobras Operation']).copy()
+        df_cleaned['Date Cleared'] = pd.to_datetime(df_cleaned['Date Cleared by Petrobras Operation']).dt.date
+
+        # Contagem de fechamentos por dia
+        fechamentos_por_dia = df_cleaned['Date Cleared'].value_counts().sort_index()
+
+        # Garantir que todos os dias no intervalo de datas estejam presentes
+        if not fechamentos_por_dia.empty:
+            date_range = pd.date_range(start=fechamentos_por_dia.index.min(), end=fechamentos_por_dia.index.max(),
+                                       freq='D')
+            fechamentos_por_dia = fechamentos_por_dia.reindex(date_range.date, fill_value=0)
+
+        # Geração do Gráfico
+        plt.figure(figsize=(15, 8))
+        ax = sns.barplot(x=fechamentos_por_dia.index, y=fechamentos_por_dia.values, color="#005a9e")
+
+        ax.set_title('Desempenho de Fechamento de Itens pela Operação', fontsize=18, fontweight='bold')
+        ax.set_xlabel('Data', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Quantidade de Itens Fechados', fontsize=12, fontweight='bold')
+        plt.xticks(rotation=45, ha='right')
+
+        # Formatar o eixo x para mostrar as datas de forma mais limpa
+        ax.xaxis.set_major_formatter(plt.FixedFormatter(fechamentos_por_dia.index.strftime('%d/%m/%Y')))
+        ax.figure.autofmt_xdate()
+
+        for p in ax.patches:
+            if p.get_height() > 0:
+                ax.annotate(f'{int(p.get_height())}',
+                            (p.get_x() + p.get_width() / 2., p.get_height()),
+                            ha='center', va='center', fontsize=11, color='black', xytext=(0, 5),
+                            textcoords='offset points')
+
+        plt.tight_layout()
+        plt.savefig(PATH_FECHAMENTO_GRAPH, dpi=200, bbox_inches='tight')
+        plt.close()
+
+        log.append(
+            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico de fechamento pela operação gerado com sucesso.")
+        return True, log
+
+    except Exception as e:
+        erro_detalhado = traceback.format_exc()
+        log.append(f"ERRO CRÍTICO ao gerar gráfico de fechamento: {str(e)}\n{erro_detalhado}")
         return False, log
 
 
@@ -589,6 +678,8 @@ def enviar_email(dados, log_processo):
 
         if os.path.exists(PATH_DASHBOARD_IMG):
             mail.Attachments.Add(PATH_DASHBOARD_IMG)
+        if os.path.exists(PATH_FECHAMENTO_GRAPH):
+            mail.Attachments.Add(PATH_FECHAMENTO_GRAPH)
 
         mail.Send()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO}.")
@@ -639,7 +730,7 @@ def enviar_mensagem_julius(dados):
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
         mail.To = EMAIL_JULIUS
-        mail.BCC = EMAIL_DESTINO  # Adiciona o canal do Teams em cópia oculta
+        mail.CC = EMAIL_DESTINO
         mail.Subject = f"Action Required: {len(df_julius_check)} Punch List Items for Closure - {datetime.now().strftime('%d/%m/%Y')}"
         mail.Importance = 2
 
@@ -674,72 +765,93 @@ def enviar_mensagem_julius(dados):
 
 # --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
-    print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
-    hora_atual = datetime.now().hour
+    if deve_executar():
+        print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
+        hora_atual = datetime.now().hour
+        sucesso_geral = True
 
-    # --- FLUXO 1: Relatório Principal (Topside) ---
-    print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
-    dados_topside, log_topside, sucesso_topside = processar_dados()
-    if sucesso_topside:
-        print("-> Dados Topside processados com sucesso.")
-        sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
-        log_total_topside = log_topside + log_dashboard
-        if sucesso_dashboard:
-            print("-> Dashboard Topside gerado com sucesso.")
-        else:
-            print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
-        enviar_email(dados_topside, log_total_topside)
-    else:
-        print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
-        enviar_email_de_falha(log_topside)
-
-    # --- FLUXO 2: E-mail para Julius ---
-    print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
-    if 7 <= hora_atual < 9:
+        # --- FLUXO 1: Relatório Principal (Topside) ---
+        print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
+        dados_topside, log_topside, sucesso_topside = processar_dados()
         if sucesso_topside:
-            enviar_mensagem_julius(dados_topside)
+            print("-> Dados Topside processados com sucesso.")
+
+            # Geração do novo gráfico de fechamento
+            sucesso_fechamento, log_fechamento = gerar_grafico_fechamento_operacao(dados_topside['df_full'])
+            if not sucesso_fechamento:
+                print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO DE FECHAMENTO !!!")
+                # A falha aqui não impede o envio do e-mail principal, mas o erro será logado.
+                log_total_topside = log_topside + log_fechamento
+            else:
+                log_total_topside = log_topside
+
+            sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
+            log_total_topside += log_dashboard
+            if sucesso_dashboard:
+                print("-> Dashboard Topside gerado com sucesso.")
+            else:
+                print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
+            enviar_email(dados_topside, log_total_topside)
         else:
-            print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
+            print("\n!!! FALHA CRÍTICA NO PROCESSamento DOS DADOS TOPSIDE !!!")
+            enviar_email_de_falha(log_topside)
+            sucesso_geral = False
+
+        # --- FLUXO 2: E-mail para Julius ---
+        print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
+        if 7 <= hora_atual < 9:
+            if sucesso_topside:
+                enviar_mensagem_julius(dados_topside)
+            else:
+                print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
+        else:
+            print(f"-> Fora do horário agendado (executado às {hora_atual}h). E-mail para Julius não enviado.")
+
+        # --- FLUXO 3: Relatório E-House ---
+        print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
+        try:
+            dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
+            if sucesso_ehouse:
+                print("-> Dados E-House processados com sucesso.")
+                sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados_ehouse)
+                if sucesso_grafico:
+                    print("-> Gráfico E-House gerado com sucesso.")
+                    enviar_email_ehouse(dados_ehouse)
+                else:
+                    print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO E-HOUSE !!!")
+                    enviar_email_de_falha(log_ehouse + log_grafico)
+                    sucesso_geral = False
+        except FileNotFoundError as e:
+            print(f"-> Arquivo E-House não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
+        except Exception as e:
+            print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE: {e} !!!")
+            enviar_email_de_falha([str(e)])
+            sucesso_geral = False
+
+        # --- FLUXO 4: Relatório Vendors ---
+        print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
+        try:
+            dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
+            if sucesso_vendors:
+                print("-> Dados de Vendors processados com sucesso.")
+                sucesso_grafico, log_grafico = gerar_grafico_vendors(dados_vendors)
+                if sucesso_grafico:
+                    print("-> Dashboard de Vendors gerado com sucesso.")
+                    enviar_email_vendors(dados_vendors)
+                else:
+                    print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE VENDORS !!!")
+                    enviar_email_de_falha(log_vendors + log_grafico)
+                    sucesso_geral = False
+        except FileNotFoundError as e:
+            print(f"-> Arquivo de Vendors não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
+        except Exception as e:
+            print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE VENDORS: {e} !!!")
+            enviar_email_de_falha([str(e)])
+            sucesso_geral = False
+
+        if sucesso_geral:
+            registrar_execucao()
+
+        print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
     else:
-        print(f"-> Fora do horário agendado (executado às {hora_atual}h). E-mail para Julius não enviado.")
-
-    # --- FLUXO 3: Relatório E-House ---
-    print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
-    try:
-        dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
-        if sucesso_ehouse:
-            print("-> Dados E-House processados com sucesso.")
-            sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados_ehouse)
-            if sucesso_grafico:
-                print("-> Gráfico E-House gerado com sucesso.")
-                enviar_email_ehouse(dados_ehouse)
-            else:
-                print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO E-HOUSE !!!")
-                enviar_email_de_falha(log_ehouse + log_grafico)
-    except FileNotFoundError as e:
-        print(f"-> Arquivo E-House não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
-    except Exception as e:
-        print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE: {e} !!!")
-        enviar_email_de_falha([str(e)])
-
-    # --- FLUXO 4: Relatório Vendors ---
-    print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
-    try:
-        dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
-        if sucesso_vendors:
-            print("-> Dados de Vendors processados com sucesso.")
-            sucesso_grafico, log_grafico = gerar_dashboard_vendors(dados_vendors)
-            if sucesso_grafico:
-                print("-> Dashboard de Vendors gerado com sucesso.")
-                enviar_email_vendors(dados_vendors)
-            else:
-                print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE VENDORS !!!")
-                enviar_email_de_falha(log_vendors + log_grafico)
-    except FileNotFoundError as e:
-        print(f"-> Arquivo de Vendors não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
-    except Exception as e:
-        print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE VENDORS: {e} !!!")
-        enviar_email_de_falha([str(e)])
-
-    print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
- 
+        print(f"--- PROCESSO DE AUTOMAÇÃO NÃO EXECUTADO CONFORME AGENDAMENTO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
