@@ -470,6 +470,12 @@ if __name__ == "__main__":
     print("Para interromper, pressione Ctrl+C.")
     print("------------------------------------------------------")
 
+    # --- EXECUÇÃO IMEDIATA PARA VALIDAÇÃO ---
+    print("\nExecutando a tarefa pela primeira vez para validação inicial...")
+    tarefa_principal()
+    print("\nValidação inicial concluída. O script continuará com os horários agendados.")
+    print("------------------------------------------------------")
+
     # Agendamento das tarefas
     schedule.every().day.at("08:00").do(tarefa_principal)
     schedule.every().day.at("12:00").do(tarefa_principal)
