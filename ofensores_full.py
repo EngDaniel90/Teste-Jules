@@ -21,7 +21,6 @@ PATH_LAST_RUN = r"C:\Users\E797\Downloads\Teste mensagem e print\last_run.txt"
 PATH_FECHAMENTO_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\fechamento_operacao.png"
 EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
-SCHEDULED_HOURS = [7, 12, 18]
 
 
 def processar_dados_ehouse():
@@ -767,13 +766,10 @@ if __name__ == "__main__":
 
     # --- FLUXO 2: E-mail para Julius ---
     print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
-    if 7 <= hora_atual < 9:
-        if sucesso_topside:
-            enviar_mensagem_julius(dados_topside)
-        else:
-            print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
+    if sucesso_topside:
+        enviar_mensagem_julius(dados_topside)
     else:
-        print(f"-> Fora do horário agendado (executado às {hora_atual}h). E-mail para Julius não enviado.")
+        print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
 
     # --- FLUXO 3: Relatório E-House ---
     print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
