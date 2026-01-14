@@ -39,18 +39,7 @@ LISTAS_SHAREPOINT = {
     "Topside": {
         "nome_api": "P84/85_TOPSIDE_DR90_Punch_List",
         "arquivo_saida": "Punch_DR90_TS.xlsx",
-        "colunas": [
-            "DECK No.", "Action Description", "KBR Comment", "Company", "KBR Discipline", "Status",
-            "Date Cleared by KBR", "Petrobras Response By", "Petrobras Response Date", "Petrobras Response ",
-            "Petrobras Remarks", "Petrobras Discipline", "Petrobras Responsible", "Seatrium Remarks", "Zone",
-            "Date Cleared by Petrobras", "S3D Item Tags", "Punch No", "KBR Target Date",
-            "Days Since Date Cleared by KBR",
-            "Days Since Date Cleared by Seatrium", "Punched by (Group)", "Petrobras Need Operation to close? (Y/N)",
-            "Date Cleared by Petrobras Operation", "Petrobras Operation accept closing? (Y/N)", "Is Reopen? (Y/N)",
-            "Seatrium Target Date Calculated", "Petrobras Operation Target Date Calculated",
-            "Petrobras Target Date Calculated", "Petrobras Target Date", "Petrobras Operation Target Date",
-            "Seatrium Target Date"
-        ]
+        "colunas": []
     },
     "E-House": {
         "nome_api": "DR90 E-House Punchlist",
@@ -329,6 +318,11 @@ class AutomacaoPunchList:
                     if not self.obter_schema_lista(session, URL_BASE_SHAREPOINT, nome_api):
                         ciclo_sucesso = False
                         continue
+
+                    # Modificação: Se for a lista Topside, busca todas as colunas do Schema
+                    if nome_lista == "Topside":
+                        self.registrar_log("Lista 'Topside' detectada. Buscando todas as colunas dinamicamente.")
+                        colunas_desejadas = list(self.schema_lista.keys())
 
                     self.registrar_log(f"Construindo query otimizada para '{nome_api}'...")
                     select_parts = []
