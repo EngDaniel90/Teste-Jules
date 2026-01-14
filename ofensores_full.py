@@ -302,7 +302,7 @@ def gerar_grafico_ehouse(dados):
         nomes_disciplinas = [item[0] for item in disciplinas_sorted]
         valores_disciplinas = [item[1] for item in disciplinas_sorted]
 
-        ax = sns.barplot(x=nomes_disciplinas, y=valores_disciplinas, palette="Blues_r")
+        ax = sns.barplot(x=nomes_disciplinas, y=valores_disciplinas, palette="Blues_r", hue=nomes_disciplinas, legend=False)
 
         ax.set_title('Status Punch E-House: Pendentes Petrobras por Disciplina', fontsize=18, fontweight='bold')
         ax.set_xlabel('Disciplina', fontsize=12, fontweight='bold')
@@ -453,7 +453,7 @@ def gerar_grafico_fechamento_operacao(df):
     log = []
     try:
         df_cleaned = df.dropna(subset=['Date Cleared by Petrobras Operation']).copy()
-        df_cleaned['Date Cleared'] = pd.to_datetime(df_cleaned['Date Cleared by Petrobras Operation']).dt.date
+        df_cleaned['Date Cleared'] = pd.to_datetime(df_cleaned['Date Cleared by Petrobras Operation'], dayfirst=True).dt.date
 
         # Contagem de fechamentos por dia
         fechamentos_por_dia = df_cleaned['Date Cleared'].value_counts().sort_index()
