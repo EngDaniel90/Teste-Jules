@@ -14,7 +14,6 @@ PATH_DASHBOARD_IMG = r"C:\Users\E797\Downloads\Teste mensagem e print\dashboard_
 PATH_OP_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\Operation to check.xlsx"
 PATH_ESUP_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\ESUP to check.xlsx"
 PATH_JULIUS_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\Julius to check.xlsx"
-PATH_PRIORITY_ITEMS_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\Priority to check.xlsx"
 PATH_EHOUSE_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_E-House.xlsx"
 PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
 PATH_VENDORS_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_Vendors.xlsx"
@@ -187,11 +186,21 @@ def processar_dados():
                       (df['Petrobras Operation accept closing? (Y/N)'] == True)
         df_julius_check = df[mask_julius].copy()
 
-        # Itens de Prioridade (Operação + SEA/KBR com status Pending PB Reply)
-        mask_priority = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                        (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR']))
-        df_priority_check = df[mask_priority].copy()
+        # --- NOVO: Agrupamento e Mapeamento para Prioridade ESUP ---
+        prioridade_esup_detalhes = []
+        if not df_esup_check.empty:
+            esup_discipline_counts = df_esup_check['Petrobras Discipline'].value_counts()
+            # Reutiliza o df_rds já carregado e cria o mapa de Disciplina -> RD (da segunda coluna)
+            # iloc[:, 0] é a primeira coluna (Disciplina), iloc[:, 1] é a segunda (RD)
+            mapa_rd = pd.Series(df_rds.iloc[:, 1].values, index=df_rds.iloc[:, 0]).to_dict()
 
+            for disciplina, contagem in esup_discipline_counts.items():
+                rd = mapa_rd.get(disciplina)
+                prioridade_esup_detalhes.append({
+                    "disciplina": disciplina,
+                    "contagem": contagem,
+                    "rd_mention": f"@{rd}" if rd else "RD não encontrado"
+                })
 
         # --- Consolidação dos Resultados ---
         resultados = {
@@ -209,7 +218,7 @@ def processar_dados():
             "df_op_check": df_op_check,
             "df_esup_check": df_esup_check,
             "df_julius_check": df_julius_check,
-            "df_priority_check": df_priority_check,
+            "prioridade_esup_detalhes": prioridade_esup_detalhes,
             "df_full": df
         }
 
@@ -606,6 +615,7 @@ def enviar_email(dados, log_processo):
     try:
         outlook = win32.Dispatch('outlook.application')
 
+        # E-mail Principal para o Canal
         mail = outlook.CreateItem(0)
         mail.Importance = 2
         mail.To = EMAIL_DESTINO
@@ -640,17 +650,18 @@ def enviar_email(dados, log_processo):
             </div>
             """
 
-        secao_priority_check_html = ""
-        df_priority_check = dados.get("df_priority_check")
-        if df_priority_check is not None and not df_priority_check.empty:
-            df_priority_check.to_excel(PATH_PRIORITY_ITEMS_CHECK, index=False)
-            mail.Attachments.Add(PATH_PRIORITY_ITEMS_CHECK)
-            secao_priority_check_html = f"""
-            <div style="border: 2px solid #FF8C00; padding: 10px; margin-top: 15px;">
-                <p><b style="color:#FF8C00;">Ponto de Atenção - Itens Prioritários (Operação/SEA/KBR):</b></p>
-                <p>Foram identificados <b>{len(df_priority_check)}</b> itens originados pela Operação ou SEA/KBR que estão pendentes de resposta.
-                Estes são os itens de maior prioridade para garantir o andamento do projeto.
-                A planilha <i>'Priority to check.xlsx'</i>, anexada a este e-mail, contém o detalhamento completo.</p>
+        secao_prioridade_esup_html = ""
+        prioridade_esup_detalhes = dados.get("prioridade_esup_detalhes")
+        if prioridade_esup_detalhes:
+            lista_prioridade_html = "".join([
+                f"<li><b>{item['disciplina']}:</b> {item['contagem']} item(ns) - Responsável: <span class='mention'>{item['rd_mention']}</span></li>"
+                for item in prioridade_esup_detalhes
+            ])
+            secao_prioridade_esup_html = f"""
+            <div style="border: 2px solid #2E8B57; padding: 10px; margin-top: 15px; background-color: #F0FFF0;">
+                <p><b style="color:#2E8B57;">Prioridade ESUP:</b></p>
+                <p>Os seguintes RDs devem verificar os itens pendentes em suas disciplinas listadas na planilha 'ESUP to check':</p>
+                <ul>{lista_prioridade_html}</ul>
             </div>
             """
 
@@ -673,9 +684,9 @@ def enviar_email(dados, log_processo):
             <p>Prezados,</p>
             <p>Segue a atualização diária das pendências do <b>Design Review TS</b>:</p>
 
-            {secao_priority_check_html}
             {secao_op_check_html}
             {secao_esup_check_html}
+            {secao_prioridade_esup_html}
 
             <p>Atualmente, temos <span class="highlight">{dados['status_counts'].get('Pending PB Reply', 0)}</span> itens com status <b>Pending PB Reply</b>.</p>
 
@@ -714,6 +725,7 @@ def enviar_email(dados, log_processo):
         mail.Send()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO}.")
 
+        # E-mail de Log de Sucesso
         log_mail = outlook.CreateItem(0)
         log_mail.To = EMAIL_LOG
         log_mail.Subject = f"Log de Execução (Sucesso) - Automação Punch List - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
@@ -725,6 +737,7 @@ def enviar_email(dados, log_processo):
     except Exception as e:
         erro_detalhado = traceback.format_exc()
         print(f"ERRO CRÍTICO ao enviar e-mail: {str(e)}\n{erro_detalhado}")
+        enviar_email_de_falha(log_processo + [f"Falha no envio do e-mail principal: {str(e)}", erro_detalhado])
 
 
 def enviar_email_de_falha(log_processo):
@@ -793,46 +806,53 @@ def enviar_mensagem_julius(dados):
         print(f"ERRO CRÍTICO ao enviar e-mail para Julius: {str(e)}\n{erro_detalhado}")
 
 
-# --- EXECUÇÃO PRINCIPAL ---
-if __name__ == "__main__":
-    print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
-    hora_atual = datetime.now().hour
+def verificar_e_executar():
+    """
+    Verifica se a automação já foi executada hoje e, caso contrário,
+    executa os fluxos de relatório.
+    """
+    hoje_str = datetime.now().strftime('%Y-%m-%d')
+    try:
+        with open(PATH_LAST_RUN, 'r') as f:
+            last_run_date = f.read().strip()
+        if last_run_date == hoje_str:
+            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Automação já executada hoje. Próxima execução amanhã.")
+            return
+    except FileNotFoundError:
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Arquivo 'last_run.txt' não encontrado. Executando pela primeira vez.")
+
+    # --- EXECUÇÃO DOS FLUXOS ---
+    log_geral = []
 
     # --- FLUXO 1: Relatório Principal (Topside) ---
-    print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
+    print("\n--- [FLUXO 1/3] Processando Relatório Principal (Topside) ---")
     dados_topside, log_topside, sucesso_topside = processar_dados()
     if sucesso_topside:
         print("-> Dados Topside processados com sucesso.")
+        log_geral.extend(log_topside)
 
         # Geração do novo gráfico de fechamento
         sucesso_fechamento, log_fechamento = gerar_grafico_fechamento_operacao(dados_topside['df_full'])
+        log_geral.extend(log_fechamento)
         if not sucesso_fechamento:
             print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO DE FECHAMENTO !!!")
             # A falha aqui não impede o envio do e-mail principal, mas o erro será logado.
-            log_total_topside = log_topside + log_fechamento
-        else:
-            log_total_topside = log_topside
 
         sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
-        log_total_topside += log_dashboard
+        log_geral.extend(log_dashboard)
         if sucesso_dashboard:
             print("-> Dashboard Topside gerado com sucesso.")
+            enviar_email(dados_topside, log_geral)
+            enviar_mensagem_julius(dados_topside)
         else:
             print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
-        enviar_email(dados_topside, log_total_topside)
+            enviar_email_de_falha(log_geral)
     else:
         print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
         enviar_email_de_falha(log_topside)
 
-    # --- FLUXO 2: E-mail para Julius ---
-    print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
-    if sucesso_topside:
-        enviar_mensagem_julius(dados_topside)
-    else:
-        print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
-
-    # --- FLUXO 3: Relatório E-House ---
-    print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
+    # --- FLUXO 2: Relatório E-House ---
+    print("\n--- [FLUXO 2/3] Processando Relatório E-House ---")
     try:
         dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
         if sucesso_ehouse:
@@ -850,8 +870,9 @@ if __name__ == "__main__":
         print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE: {e} !!!")
         enviar_email_de_falha([str(e)])
 
-    # --- FLUXO 4: Relatório Vendors ---
-    print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
+
+    # --- FLUXO 3: Relatório Vendors ---
+    print("\n--- [FLUXO 3/3] Processando Relatório Vendors ---")
     try:
         dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
         if sucesso_vendors:
@@ -868,5 +889,20 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE VENDORS: {e} !!!")
         enviar_email_de_falha([str(e)])
+
+    # Atualiza o arquivo de controle
+    with open(PATH_LAST_RUN, 'w') as f:
+        f.write(hoje_str)
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Arquivo 'last_run.txt' atualizado.")
+
+
+# --- EXECUÇÃO PRINCIPAL ---
+if __name__ == "__main__":
+    print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
+    hora_atual = datetime.now().hour
+
+    # A lógica de agendamento (entre 7h e 9h) foi simplificada para rodar sempre
+    # que o script for chamado, mas apenas uma vez por dia.
+    verificar_e_executar()
 
     print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
