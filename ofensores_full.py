@@ -5,6 +5,7 @@ import win32com.client as win32
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
+import matplotlib.dates as mdates
 
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
 PATH_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx"
@@ -448,35 +449,66 @@ def gerar_dashboard_vendors(dados):
 
 def gerar_grafico_fechamento_operacao(df):
     """
-    Gera um gráfico de barras mostrando a quantidade de itens que a operação fechou por dia.
+    Gera um gráfico de barras mostrando a quantidade de itens que a operação fechou por dia,
+    cobrindo o período desde a primeira data de fechamento até o dia atual.
     """
     log = []
     try:
+        # 1. Limpeza e conversão de dados
         df_cleaned = df.dropna(subset=['Date Cleared by Petrobras Operation']).copy()
-        df_cleaned['Date Cleared'] = pd.to_datetime(df_cleaned['Date Cleared by Petrobras Operation'], dayfirst=True).dt.date
 
-        # Contagem de fechamentos por dia
-        fechamentos_por_dia = df_cleaned['Date Cleared'].value_counts().sort_index()
+        # Converte para datetime, tratando erros e o formato dd/mm/yyyy
+        df_cleaned['Date Cleared'] = pd.to_datetime(
+            df_cleaned['Date Cleared by Petrobras Operation'],
+            dayfirst=True,
+            errors='coerce'
+        )
 
-        # Garantir que todos os dias no intervalo de datas estejam presentes
-        if not fechamentos_por_dia.empty:
-            date_range = pd.date_range(start=fechamentos_por_dia.index.min(), end=fechamentos_por_dia.index.max(),
-                                       freq='D')
-            fechamentos_por_dia = fechamentos_por_dia.reindex(date_range.date, fill_value=0)
+        # Remove quaisquer linhas que não puderam ser convertidas
+        df_cleaned.dropna(subset=['Date Cleared'], inplace=True)
 
-        # Geração do Gráfico
+        # 2. Lida com o caso de não haver dados válidos
+        if df_cleaned.empty:
+            log.append("Nenhum dado válido de fechamento pela operação encontrado para gerar o gráfico.")
+            # É importante retornar True para não ser tratado como uma falha crítica
+            return True, log
+
+        # 3. Preparação do intervalo de datas e contagem
+        # Extrai apenas a data para a contagem
+        df_cleaned['Date Cleared'] = df_cleaned['Date Cleared'].dt.date
+        fechamentos_por_dia = df_cleaned['Date Cleared'].value_counts()
+
+        # Determina o intervalo completo do gráfico: do primeiro fechamento até hoje
+        start_date = fechamentos_por_dia.index.min()
+        end_date = datetime.now().date()
+
+        # Cria um índice com todos os dias no intervalo
+        full_date_range = pd.date_range(start=start_date, end=end_date, freq='D').date
+
+        # Reindexa a contagem para incluir todos os dias, preenchendo dias sem fechamento com 0
+        fechamentos_por_dia = fechamentos_por_dia.reindex(full_date_range, fill_value=0).sort_index()
+
+        # 4. Geração do Gráfico
         plt.figure(figsize=(15, 8))
-        ax = sns.barplot(x=fechamentos_por_dia.index, y=fechamentos_por_dia.values, color="#005a9e")
+        ax = sns.barplot(x=fechamentos_por_dia.index, y=fechamentos_por_dia.values, color="#005a9e", hue=fechamentos_por_dia.index, legend=False)
 
         ax.set_title('Desempenho de Fechamento de Itens pela Operação', fontsize=18, fontweight='bold')
         ax.set_xlabel('Data', fontsize=12, fontweight='bold')
         ax.set_ylabel('Quantidade de Itens Fechados', fontsize=12, fontweight='bold')
+
+        # 5. Formatação correta do eixo de data
+        # Define o formato da data para dia/mês/ano
+        date_format = mdates.DateFormatter('%d/%m/%Y')
+        ax.xaxis.set_major_formatter(date_format)
+
+        # Melhora a legibilidade rotacionando as datas
         plt.xticks(rotation=45, ha='right')
 
-        # Formatar o eixo x para mostrar as datas de forma mais limpa
-        ax.xaxis.set_major_formatter(plt.FixedFormatter(fechamentos_por_dia.index.strftime('%d/%m/%Y')))
-        ax.figure.autofmt_xdate()
+        # Ajusta automaticamente o espaçamento para evitar sobreposição
+        fig = plt.gcf()
+        fig.autofmt_xdate()
 
+        # Adiciona os rótulos de dados (contagem) acima das barras
         for p in ax.patches:
             if p.get_height() > 0:
                 ax.annotate(f'{int(p.get_height())}',
@@ -488,8 +520,7 @@ def gerar_grafico_fechamento_operacao(df):
         plt.savefig(PATH_FECHAMENTO_GRAPH, dpi=200, bbox_inches='tight')
         plt.close()
 
-        log.append(
-            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico de fechamento pela operação gerado com sucesso.")
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico de fechamento pela operação gerado com sucesso.")
         return True, log
 
     except Exception as e:
