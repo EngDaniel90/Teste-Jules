@@ -7,18 +7,18 @@ import seaborn as sns
 import os
 
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
-PATH_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_TS.xlsx"
-PATH_RDS = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\RDs_ESUP.xlsx"
-PATH_DASHBOARD_IMG = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\dashboard_status.png"
-PATH_OP_CHECK = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\Operation to check.xlsx"
-PATH_ESUP_CHECK = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\ESUP to check.xlsx"
-PATH_JULIUS_CHECK = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\Julius to check.xlsx"
-PATH_EHOUSE_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_E-House.xlsx"
-PATH_EHOUSE_GRAPH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\ehouse_status_graph.png"
-PATH_VENDORS_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_Vendors.xlsx"
-PATH_VENDORS_GRAPH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\vendors_status_graph.png"
-PATH_LAST_RUN = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\last_run.txt"
-PATH_FECHAMENTO_GRAPH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\fechamento_operacao.png"
+PATH_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx"
+PATH_RDS = r"C:\Users\E797\Downloads\Teste mensagem e print\RDs_ESUP.xlsx"
+PATH_DASHBOARD_IMG = r"C:\Users\E797\Downloads\Teste mensagem e print\dashboard_status.png"
+PATH_OP_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\Operation to check.xlsx"
+PATH_ESUP_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\ESUP to check.xlsx"
+PATH_JULIUS_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\Julius to check.xlsx"
+PATH_EHOUSE_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_E-House.xlsx"
+PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
+PATH_VENDORS_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_Vendors.xlsx"
+PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
+PATH_LAST_RUN = r"C:\Users\E797\Downloads\Teste mensagem e print\last_run.txt"
+PATH_FECHAMENTO_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\fechamento_operacao.png"
 EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
 SCHEDULED_HOURS = [7, 12, 18]
@@ -48,6 +48,7 @@ def processar_dados_ehouse():
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
+        print(f"ERRO CRÍTICO no processamento de dados E-House: {str(e)}\n{erro_detalhado}")
         log.append(f"ERRO CRÍTICO no processamento de dados E-House: {str(e)}\n{erro_detalhado}")
         return None, log, False
 
@@ -77,6 +78,7 @@ def processar_dados_vendors():
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
+        print(f"ERRO CRÍTICO no processamento de dados de Vendors: {str(e)}\n{erro_detalhado}")
         log.append(f"ERRO CRÍTICO no processamento de dados de Vendors: {str(e)}\n{erro_detalhado}")
         return None, log, False
 
@@ -493,6 +495,7 @@ def gerar_grafico_fechamento_operacao(df):
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
+        print(f"ERRO CRÍTICO ao gerar gráfico de fechamento: {str(e)}\n{erro_detalhado}")
         log.append(f"ERRO CRÍTICO ao gerar gráfico de fechamento: {str(e)}\n{erro_detalhado}")
         return False, log
 
