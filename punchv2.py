@@ -3,10 +3,11 @@ import sys
 import time
 import shutil
 import urllib3
-import urllib.request
+import urllib.parse
 import requests
 import pandas as pd
 from datetime import datetime
+import re
 
 # Importação para comunicação com Outlook Local
 try:
@@ -98,6 +99,13 @@ class AutomacaoPunchList:
         print(texto)
         self.log_sessao.append(texto)
 
+    def normalize_key(self, text):
+        """Remove símbolos e espaços para comparação robusta."""
+        if not text:
+            return ""
+        # Mantém apenas letras e números, minúsculo
+        return "".join(c for c in text if c.isalnum()).lower()
+
     def enviar_via_outlook_app(self, sucesso):
         status_geral = "SUCESSO" if sucesso else "FALHA"
         cor_status_geral = "#28a745" if sucesso else "#dc3545"
@@ -105,7 +113,6 @@ class AutomacaoPunchList:
         log_html_lines = []
         for linha in self.log_sessao:
             classe_css = ""
-            # Remove o timestamp para a verificação de palavras-chave
             linha_sem_ts = linha.split("] ", 1)[-1] if "] " in linha else linha
 
             if "SUCESSO" in linha_sem_ts:
@@ -161,6 +168,21 @@ class AutomacaoPunchList:
         except Exception as e:
             self.registrar_log(f"Falha ao enviar e-mail via Outlook Desktop: {e}")
 
+    def get_col_info(self, display_name):
+        """Busca informações da coluna usando lógica fuzzy."""
+        # 1. Tenta match exato
+        col_info = self.schema_lista.get(display_name)
+        if col_info:
+            return col_info
+
+        # 2. Tenta match normalizado (sem espaços, minúsculo, sem símbolos)
+        normalized_target = self.normalize_key(display_name)
+        for k, v in self.schema_lista.items():
+            if self.normalize_key(k) == normalized_target:
+                return v
+
+        return None
+
     def tratar_dados(self, raw_data, colunas_desejadas):
         self.registrar_log("Processando e estruturando dados recebidos...")
         processed_data = []
@@ -170,55 +192,62 @@ class AutomacaoPunchList:
             new_row = {}
             # Itera sobre as colunas que o usuário deseja no resultado final
             for display_name in colunas_desejadas:
-                # Normalização básica para encontrar a chave no schema (remove espaços extras)
-                col_info = self.schema_lista.get(display_name)
 
-                if not col_info:
-                    # Tenta encontrar ignorando case/espaços se não achou direto
-                    for k, v in self.schema_lista.items():
-                        if k.strip().lower() == display_name.strip().lower():
-                            col_info = v
+                col_info = self.get_col_info(display_name)
+
+                # Se achou no schema, usa o nome interno oficial
+                if col_info:
+                    internal_name = col_info['internal_name']
+                    col_type = col_info['type']
+                else:
+                    # Se NÃO achou no schema, tenta adivinhar o InternalName ou buscar nas chaves do item
+                    # Isso ajuda quando o schema falhou mas o dado veio via "Select *"
+                    internal_name = None
+                    col_type = 'Text'  # Assumir texto
+
+                    # Tenta achar uma chave no item que pareça com o nome desejado
+                    normalized_target = self.normalize_key(display_name)
+                    for k in item.keys():
+                        if self.normalize_key(k) == normalized_target:
+                            internal_name = k
                             break
 
-                if not col_info:
-                    continue
+                # Tenta pegar o valor
+                value = None
+                if internal_name:
+                    value = item.get(internal_name)
 
-                internal_name = col_info['internal_name']
-                col_type = col_info['type']
-                value = item.get(internal_name)
+                # Se não temos internal_name ou valor, tentamos pelo display_name direto (raro)
+                if value is None:
+                    value = item.get(display_name)
 
                 # Tratamento robusto para campos complexos (Pessoa/Grupo, Pesquisa)
                 if col_type in ['User', 'Lookup', 'UserMulti', 'LookupMulti']:
                     if value and isinstance(value, dict):
-                        # Caso ideal: Veio o objeto expandido (Dicionário)
-                        if 'results' in value:  # Multiplos valores
+                        if 'results' in value:
                             results = value.get('results', [])
                             new_row[display_name] = '; '.join([v.get('Title', str(v)) for v in results])
-                        else:  # Valor único
+                        else:
                             new_row[display_name] = value.get('Title', '')
                     else:
-                        # Caso Fallback: Veio apenas o ID (int) ou nada, pois a expansão falhou ou não foi solicitada
-                        # Se tivermos o ID, salvamos o ID para não perder a referência
-                        val_id = item.get(f"{internal_name}Id")
+                        # Fallback ID
+                        val_id = item.get(f"{internal_name}Id") if internal_name else None
                         if val_id:
-                            new_row[display_name] = f"ID: {val_id}"  # Melhor que vazio
+                            new_row[display_name] = f"ID: {val_id}"
                         elif value is not None:
                             new_row[display_name] = str(value)
                         else:
                             new_row[display_name] = ''
 
-                # Campos de Multipla Escolha (Texto)
                 elif col_type == 'MultiChoice' and value and isinstance(value, dict):
                     results = value.get('results', [])
                     new_row[display_name] = '; '.join([str(v) for v in results])
 
-                # Outros campos
                 else:
                     new_row[display_name] = value if value is not None else ''
 
             processed_data.append(new_row)
 
-        # Cria o DataFrame
         df = pd.DataFrame(processed_data)
         self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
 
@@ -248,7 +277,6 @@ class AutomacaoPunchList:
 
     def obter_schema_lista(self, session, base_url, nome_api):
         self.registrar_log(f"Obtendo schema da lista '{nome_api}'...")
-        # Usa urllib quote para garantir que espaços na URL sejam tratados (%20)
         safe_nome_api = urllib.parse.quote(nome_api)
         endpoint = f"{base_url}/_api/web/lists/getbytitle('{safe_nome_api}')/fields"
         headers = {"Accept": "application/json;odata=verbose"}
@@ -258,7 +286,8 @@ class AutomacaoPunchList:
                 fields = response.json()['d']['results']
                 self.schema_lista = {f['Title']: {
                     'internal_name': f['InternalName'],
-                    'type': f.get('TypeAsString', 'Text')
+                    'type': f.get('TypeAsString', 'Text'),
+                    'static_name': f.get('StaticName', '')
                 } for f in fields}
                 self.registrar_log(f"Schema obtido. {len(self.schema_lista)} campos mapeados.")
                 return True
@@ -286,9 +315,6 @@ class AutomacaoPunchList:
             self.registrar_log("Aguardando login na Seatrium...")
             wait = WebDriverWait(self.driver, 120)
 
-            # Modificado: Busca por elementos que indicam que a página carregou após o login
-            # (Grid de dados OU Menu de Usuário OU Barra de Comando)
-            # O seletor CSS com vírgula funciona como um "OR"
             wait.until(EC.presence_of_element_located((
                 By.CSS_SELECTOR,
                 "[role='grid'], #O365_MainLink_Me, #O365_HeaderLeftRegion, #spCommandBar"
@@ -330,49 +356,53 @@ class AutomacaoPunchList:
                         ciclo_sucesso = False
                         continue
 
-                    self.registrar_log(f"Construindo query otimizada para '{nome_api}'...")
-                    select_parts = []
+                    self.registrar_log(f"Construindo query para '{nome_api}'...")
+
                     expand_parts = []
+                    missing_columns = []
 
+                    # 1. Identificar colunas e montar Expands
                     for nome_coluna in colunas_desejadas:
-                        col_details = self.schema_lista.get(nome_coluna)
-                        # Tenta match fuzzy se não achar exato
-                        if not col_details:
-                            for k, v in self.schema_lista.items():
-                                if k.strip().lower() == nome_coluna.strip().lower():
-                                    col_details = v
-                                    break
+                        col_info = self.get_col_info(nome_coluna)
 
-                        if not col_details:
-                            self.registrar_log(f"AVISO: Coluna '{nome_coluna}' não encontrada no Schema.")
+                        if not col_info:
+                            missing_columns.append(nome_coluna)
                             continue
 
-                        internal_name = col_details['internal_name']
-                        col_type = col_details['type']
+                        internal_name = col_info['internal_name']
+                        col_type = col_info['type']
 
                         if col_type in ['User', 'Lookup', 'UserMulti', 'LookupMulti']:
                             expand_parts.append(internal_name)
-                            select_parts.append(f"{internal_name}/Title")
-                        else:
-                            select_parts.append(internal_name)
 
-                    # Tentativa 1: Query Completa (Com Expansões)
+                    if missing_columns:
+                        self.registrar_log(
+                            f"AVISO: {len(missing_columns)} colunas não foram encontradas no Schema (serão buscadas via 'Select *'):")
+                        for mc in missing_columns:
+                            self.registrar_log(f"   - {mc}")
+
+                    # 2. Query Estratégia "SELECT ALL"
+                    # Seleciona TUDO (*) + ID + Expansões específicas
                     query_params = ["$top=5000"]
-                    if select_parts:
-                        select_str = ','.join(select_parts)
-                        query_params.append(f"$select=Id,{select_str}")
+
+                    select_clause = "Id,*"
+                    # Adiciona os campos expandidos no select (necessário para pegar Title)
+                    expanded_selects = [f"{exp}/Title" for exp in expand_parts]
+                    if expanded_selects:
+                        select_clause += "," + ",".join(expanded_selects)
+
+                    query_params.append(f"$select={select_clause}")
+
                     if expand_parts:
-                        # Limita expansões para tentar evitar erro 400 se possível, mas SharePoint limita a ~8-12
                         expand_str = ','.join(list(set(expand_parts)))
                         query_params.append(f"$expand={expand_str}")
 
                     endpoint = f"{URL_BASE_SHAREPOINT}/_api/web/lists/getbytitle('{safe_nome_api}')/items?{'&'.join(query_params)}"
                     headers = {"Accept": "application/json;odata=verbose"}
 
-                    self.registrar_log(f"Baixando dados (Tentativa 1 - Otimizada)...")
+                    self.registrar_log(f"Baixando dados (Modo Completo)...")
                     response = session.get(endpoint, headers=headers)
 
-                    # LOGICA DE FALLBACK PARA ERRO 400
                     results = []
                     sucesso_download = False
 
@@ -381,19 +411,18 @@ class AutomacaoPunchList:
                         sucesso_download = True
                     elif response.status_code == 400:
                         self.registrar_log(
-                            "AVISO: Erro 400 (Bad Request). A query provavelmente excedeu o limite de colunas Lookup/User.")
-                        self.registrar_log("Iniciando Tentativa 2 (Modo Simplificado - Sem expansão de nomes)...")
+                            "AVISO: Erro 400. Muitos campos 'Pessoa/Lookup'. Tentando modo simplificado (IDs).")
 
-                        # Tentativa 2: Baixar tudo sem processar User/Lookup (vai vir ID em vez de Nome)
+                        # Fallback: Select * SEM Expands
                         endpoint_fallback = f"{URL_BASE_SHAREPOINT}/_api/web/lists/getbytitle('{safe_nome_api}')/items?$top=5000"
                         response_fallback = session.get(endpoint_fallback, headers=headers)
 
                         if response_fallback.status_code == 200:
                             results = response_fallback.json().get('d', {}).get('results', [])
                             sucesso_download = True
-                            self.registrar_log("Tentativa 2 bem sucedida. Dados brutos recuperados.")
+                            self.registrar_log("Dados brutos recuperados com sucesso.")
                         else:
-                            self.registrar_log(f"ERRO: Tentativa 2 falhou. Status: {response_fallback.status_code}")
+                            self.registrar_log(f"ERRO: Fallback falhou. Status: {response_fallback.status_code}")
                     else:
                         self.registrar_log(f"ERRO: Falha ao baixar dados. Status API: {response.status_code}")
 
