@@ -490,7 +490,7 @@ def gerar_grafico_fechamento_operacao(df):
 
         # 4. Geração do Gráfico
         plt.figure(figsize=(15, 8))
-        ax = sns.barplot(x=fechamentos_por_dia.index, y=fechamentos_por_dia.values, color="#005a9e", hue=fechamentos_por_dia.index, legend=False)
+        ax = sns.barplot(x=fechamentos_por_dia.index, y=fechamentos_por_dia.values, palette='dark:#005a9e', hue=fechamentos_por_dia.index, legend=False)
 
         ax.set_title('Desempenho de Fechamento de Itens pela Operação', fontsize=18, fontweight='bold')
         ax.set_xlabel('Data', fontsize=12, fontweight='bold')
