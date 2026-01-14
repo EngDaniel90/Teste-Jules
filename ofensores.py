@@ -7,21 +7,22 @@ import seaborn as sns
 import os
 
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
-PATH_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_TS.xlsx"
-PATH_RDS = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\RDs_ESUP.xlsx"
-PATH_DASHBOARD_IMG = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\dashboard_status.png"
-PATH_OP_CHECK = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\Operation to check.xlsx"
-PATH_ESUP_CHECK = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\ESUP to check.xlsx"
-PATH_JULIUS_CHECK = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\Julius to check.xlsx"
-PATH_EHOUSE_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_E-House.xlsx"
-PATH_EHOUSE_GRAPH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\ehouse_status_graph.png"
-PATH_VENDORS_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_Vendors.xlsx"
-PATH_VENDORS_GRAPH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\vendors_status_graph.png"
-PATH_LAST_RUN = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\last_run.txt"
-PATH_FECHAMENTO_GRAPH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Arquivos_de_apoio\fechamento_operacao.png"
+PATH_PUNCH = "Punch_DR90_TS.xlsx"
+PATH_RDS = "Arquivos_de_apoio/RDs_ESUP.xlsx"
+PATH_DASHBOARD_IMG = "output/dashboard_status.png"
+PATH_OP_CHECK = "output/Operation_to_check.xlsx"
+PATH_ESUP_CHECK = "output/ESUP_to_check.xlsx"
+PATH_JULIUS_CHECK = "output/Julius_to_check.xlsx"
+PATH_EHOUSE_PUNCH = "Punch_DR90_E-House.xlsx"
+PATH_EHOUSE_GRAPH = "output/ehouse_status_graph.png"
+PATH_VENDORS_PUNCH = "Punch_DR90_Vendors.xlsx"
+PATH_VENDORS_GRAPH = "output/vendors_status_graph.png"
+PATH_LAST_RUN = "output/last_run.txt"
+PATH_FECHAMENTO_GRAPH = "output/fechamento_operacao.png"
 EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
 SCHEDULED_HOURS = [7, 12, 18]
+primeira_execucao_do_dia = False
 
 
 def deve_executar():
@@ -47,6 +48,8 @@ def deve_executar():
 
     # 1. Lógica de primeira execução do dia
     if ultima_execucao_data < hoje:
+        global primeira_execucao_do_dia
+        primeira_execucao_do_dia = True
         print(f"Primeira execução do dia ({hoje}). Ignorando horários agendados.")
         return True
 
@@ -347,7 +350,7 @@ def gerar_grafico_ehouse(dados):
         nomes_disciplinas = [item[0] for item in disciplinas_sorted]
         valores_disciplinas = [item[1] for item in disciplinas_sorted]
 
-        ax = sns.barplot(x=nomes_disciplinas, y=valores_disciplinas, palette="Blues_r")
+        ax = sns.barplot(x=nomes_disciplinas, y=valores_disciplinas, palette="Blues_r", hue=nomes_disciplinas, legend=False)
 
         ax.set_title('Status Punch E-House: Pendentes Petrobras por Disciplina', fontsize=18, fontweight='bold')
         ax.set_xlabel('Disciplina', fontsize=12, fontweight='bold')
@@ -451,7 +454,7 @@ def gerar_grafico_vendors(dados):
         nomes_disciplinas = [item[0] for item in disciplinas_sorted]
         valores_disciplinas = [item[1] for item in disciplinas_sorted]
 
-        ax = sns.barplot(x=nomes_disciplinas, y=valores_disciplinas, palette="Greens_r")
+        ax = sns.barplot(x=nomes_disciplinas, y=valores_disciplinas, palette="Greens_r", hue=nomes_disciplinas, legend=False)
 
         ax.set_title('Status Punch Vendors: Pendentes Petrobras por Disciplina', fontsize=18, fontweight='bold')
         ax.set_xlabel('Disciplina', fontsize=12, fontweight='bold')
@@ -766,6 +769,7 @@ def enviar_mensagem_julius(dados):
 # --- EXECUÇÃO PRINCIPAL ---
 if __name__ == "__main__":
     if deve_executar():
+        os.makedirs("output", exist_ok=True)
         print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
         hora_atual = datetime.now().hour
         sucesso_geral = True
@@ -799,7 +803,7 @@ if __name__ == "__main__":
 
         # --- FLUXO 2: E-mail para Julius ---
         print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
-        if 7 <= hora_atual < 9:
+        if primeira_execucao_do_dia or (7 <= hora_atual < 9):
             if sucesso_topside:
                 enviar_mensagem_julius(dados_topside)
             else:
