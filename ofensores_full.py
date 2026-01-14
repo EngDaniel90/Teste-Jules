@@ -205,6 +205,7 @@ def processar_dados():
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
+        print(f"ERRO CRÍTICO no processamento de dados: {str(e)}\n{erro_detalhado}")
         log.append(f"ERRO CRÍTICO no processamento de dados: {str(e)}\n{erro_detalhado}")
         return None, log, False
 
