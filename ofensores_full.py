@@ -111,7 +111,7 @@ def processar_dados():
 
         # 4. Pending Operation Reply
         mask_op_reply = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                        (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
+                        (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
                         (df['Petrobras Operation accept closing? (Y/N)'].isna())
         df_pending_op = df[mask_op_reply].copy()
         count_pending_op_reply = len(df_pending_op)
@@ -137,10 +137,10 @@ def processar_dados():
         count_esup_indep_op = count_esup_overdue - count_esup_dep_op
 
         # 8. Grupos de Avaliação
-        mask_op_group = df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])
+        mask_op_group = df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])
         resp_op_group = len(df[mask_op_group & df['Date Cleared by Petrobras Operation'].notna()])
 
-        mask_eng_group = df['Punched by  (Group)'] == 'PB - Engineering'
+        mask_eng_group = df['Punched by (Group)'] == 'PB - Engineering'
         resp_eng_by_op = len(df[mask_eng_group & df['Date Cleared by Petrobras Operation'].notna()])
 
         # 9. Mapeamento de RDs para Menção (@)
@@ -157,19 +157,19 @@ def processar_dados():
 
         # Itens pendentes de resposta OBRIGATÓRIA da operação
         mask_op_check = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                        (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
+                        (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
                         (df['Date Cleared by Petrobras Operation'].isna())
         df_op_check = df[mask_op_check].copy()
 
         # Itens para ESUP checar (Parte 1: Engenharia com prazo de operação vencido)
         mask_esup_p1 = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                       (df['Punched by  (Group)'] == 'PB - Engineering') & \
+                       (df['Punched by (Group)'] == 'PB - Engineering') & \
                        (pd.to_datetime(df['Petrobras Operation Target Date'], dayfirst=True, errors='coerce') < hoje)
         df_esup_p1 = df[mask_esup_p1].copy()
 
         # Itens para ESUP checar (Parte 2: Operação respondeu 'False')
         mask_esup_p2 = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                       (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
+                       (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
                        (df['Petrobras Operation accept closing? (Y/N)'] == False)
         df_esup_p2 = df[mask_esup_p2].copy()
 
@@ -177,7 +177,7 @@ def processar_dados():
 
         # Itens para Julius checar (Operação respondeu 'True')
         mask_julius = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                      (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
+                      (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
                       (df['Petrobras Operation accept closing? (Y/N)'] == True)
         df_julius_check = df[mask_julius].copy()
 
