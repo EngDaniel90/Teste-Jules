@@ -20,7 +20,8 @@ PATH_VENDORS_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90
 PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
 PATH_LAST_RUN = r"C:\Users\E797\Downloads\Teste mensagem e print\last_run.txt"
 PATH_FECHAMENTO_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\fechamento_operacao.png"
-EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
+EMAIL_DESTINO = "279a5359.petrobras.com.br@br.teams.ms"
+EMAIL_LOG = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
 
 
@@ -686,7 +687,7 @@ def enviar_email(dados, log_processo):
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO}.")
 
         log_mail = outlook.CreateItem(0)
-        log_mail.To = EMAIL_DESTINO
+        log_mail.To = EMAIL_LOG
         log_mail.Subject = f"Log de Execução (Sucesso) - Automação Punch List - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
         log_mail.Body = f"Execução concluída com sucesso em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n" + "\n".join(
             log_processo)
@@ -705,7 +706,7 @@ def enviar_email_de_falha(log_processo):
     try:
         outlook = win32.Dispatch('outlook.application')
         log_mail = outlook.CreateItem(0)
-        log_mail.To = EMAIL_DESTINO
+        log_mail.To = EMAIL_LOG
         log_mail.Subject = f"Log de Execução (FALHA) - Automação Punch List - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
         log_mail.Body = (f"A automação falhou em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
                          "Causa do Erro:\n" + "\n".join(log_processo))
