@@ -14,6 +14,7 @@ PATH_DASHBOARD_IMG = r"C:\Users\E797\Downloads\Teste mensagem e print\dashboard_
 PATH_OP_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\Operation to check.xlsx"
 PATH_ESUP_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\ESUP to check.xlsx"
 PATH_JULIUS_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\Julius to check.xlsx"
+PATH_PRIORITY_ITEMS_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\Priority to check.xlsx"
 PATH_EHOUSE_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_E-House.xlsx"
 PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
 PATH_VENDORS_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_Vendors.xlsx"
@@ -23,6 +24,8 @@ PATH_FECHAMENTO_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\fechame
 EMAIL_DESTINO = "279a5359.petrobras.com.br@br.teams.ms"
 EMAIL_LOG = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
+EMAIL_MELISSA = "melissa.rodrigues@petrobras.com.br"
+EMAIL_ANDRE = "andre.cascao@petrobras.com.br"
 
 
 def processar_dados_ehouse():
@@ -184,6 +187,12 @@ def processar_dados():
                       (df['Petrobras Operation accept closing? (Y/N)'] == True)
         df_julius_check = df[mask_julius].copy()
 
+        # Itens de Prioridade (Operação + SEA/KBR com status Pending PB Reply)
+        mask_priority = (df['Status'].str.strip() == 'Pending PB Reply') & \
+                        (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR']))
+        df_priority_check = df[mask_priority].copy()
+
+
         # --- Consolidação dos Resultados ---
         resultados = {
             "total_punches": len(df),
@@ -200,6 +209,7 @@ def processar_dados():
             "df_op_check": df_op_check,
             "df_esup_check": df_esup_check,
             "df_julius_check": df_julius_check,
+            "df_priority_check": df_priority_check,
             "df_full": df
         }
 
@@ -344,6 +354,7 @@ def enviar_email_ehouse(dados):
         mail = outlook.CreateItem(0)
         mail.Importance = 2
         mail.To = EMAIL_DESTINO
+        mail.CC = f"{EMAIL_MELISSA}; {EMAIL_ANDRE}"
         mail.Subject = f"Status Report: Punch List DR90 E-House - {datetime.now().strftime('%d/%m/%Y')}"
 
         disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
@@ -545,6 +556,7 @@ def enviar_email_vendors(dados):
         mail = outlook.CreateItem(0)
         mail.Importance = 2
         mail.To = EMAIL_DESTINO
+        mail.CC = f"{EMAIL_MELISSA}; {EMAIL_ANDRE}"
         mail.Subject = f"Status Report: Punch List DR90 Vendors - {datetime.now().strftime('%d/%m/%Y')}"
 
         disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
@@ -597,6 +609,7 @@ def enviar_email(dados, log_processo):
         mail = outlook.CreateItem(0)
         mail.Importance = 2
         mail.To = EMAIL_DESTINO
+        mail.CC = f"{EMAIL_MELISSA}; {EMAIL_ANDRE}"
         mail.Subject = f"Status Report: Punch List DR90 TS - {datetime.now().strftime('%d/%m/%Y')}"
 
         disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_status'].items()])
@@ -627,6 +640,20 @@ def enviar_email(dados, log_processo):
             </div>
             """
 
+        secao_priority_check_html = ""
+        df_priority_check = dados.get("df_priority_check")
+        if df_priority_check is not None and not df_priority_check.empty:
+            df_priority_check.to_excel(PATH_PRIORITY_ITEMS_CHECK, index=False)
+            mail.Attachments.Add(PATH_PRIORITY_ITEMS_CHECK)
+            secao_priority_check_html = f"""
+            <div style="border: 2px solid #FF8C00; padding: 10px; margin-top: 15px;">
+                <p><b style="color:#FF8C00;">Ponto de Atenção - Itens Prioritários (Operação/SEA/KBR):</b></p>
+                <p>Foram identificados <b>{len(df_priority_check)}</b> itens originados pela Operação ou SEA/KBR que estão pendentes de resposta.
+                Estes são os itens de maior prioridade para garantir o andamento do projeto.
+                A planilha <i>'Priority to check.xlsx'</i>, anexada a este e-mail, contém o detalhamento completo.</p>
+            </div>
+            """
+
         mail.HTMLBody = f"""
         <html lang="pt-BR">
         <head>
@@ -646,6 +673,7 @@ def enviar_email(dados, log_processo):
             <p>Prezados,</p>
             <p>Segue a atualização diária das pendências do <b>Design Review TS</b>:</p>
 
+            {secao_priority_check_html}
             {secao_op_check_html}
             {secao_esup_check_html}
 
@@ -732,7 +760,7 @@ def enviar_mensagem_julius(dados):
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
         mail.To = EMAIL_JULIUS
-        mail.CC = EMAIL_DESTINO
+        mail.CC = f"{EMAIL_LOG}; {EMAIL_MELISSA}"
         mail.Subject = f"Action Required: {len(df_julius_check)} Punch List Items for Closure - {datetime.now().strftime('%d/%m/%Y')}"
         mail.Importance = 2
 
