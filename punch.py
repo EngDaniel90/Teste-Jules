@@ -7,6 +7,7 @@ import urllib.request
 import requests
 import pandas as pd
 from datetime import datetime
+import re
 
 # Importação para comunicação com Outlook Local
 try:
@@ -170,7 +171,9 @@ class AutomacaoPunchList:
             new_row = {}
             # Itera sobre as colunas que o usuário deseja no resultado final
             for display_name in colunas_desejadas:
-                col_info = self.schema_lista.get(display_name)
+                # Normaliza o nome da coluna da configuração para fazer o lookup
+                normalized_display_name = re.sub(r'\s+', ' ', display_name.strip())
+                col_info = self.schema_lista.get(normalized_display_name)
 
                 # Se a coluna desejada não existe no schema, pula para a próxima
                 if not col_info:
@@ -240,11 +243,13 @@ class AutomacaoPunchList:
             response = session.get(endpoint, headers=headers)
             if response.status_code == 200:
                 fields = response.json()['d']['results']
-                # Mapeamento do Título para os detalhes do campo para fácil consulta
-                self.schema_lista = {f['Title']: {
-                    'internal_name': f['InternalName'],
-                    'type': f.get('TypeAsString', 'Text')
-                } for f in fields}
+                # Mapeamento do Título NORMALIZADO para os detalhes do campo
+                self.schema_lista = {
+                    re.sub(r'\s+', ' ', f['Title'].strip()): {
+                        'internal_name': f['InternalName'],
+                        'type': f.get('TypeAsString', 'Text')
+                    } for f in fields if 'Title' in f and f['Title']
+                }
                 self.registrar_log(f"Schema da lista '{nome_api}' obtido com sucesso.")
                 return True
             else:
@@ -307,7 +312,9 @@ class AutomacaoPunchList:
                     expand_parts = []
 
                     for nome_coluna in colunas_desejadas:
-                        col_details = self.schema_lista.get(nome_coluna)
+                        # Normaliza o nome da coluna da configuração para fazer o lookup
+                        normalized_lookup = re.sub(r'\s+', ' ', nome_coluna.strip())
+                        col_details = self.schema_lista.get(normalized_lookup)
 
                         if not col_details:
                             self.registrar_log(f"AVISO: Coluna '{nome_coluna}' não encontrada no schema do SharePoint. Será ignorada.")
