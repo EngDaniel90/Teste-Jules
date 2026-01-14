@@ -199,6 +199,11 @@ class AutomacaoPunchList:
         df = pd.DataFrame(processed_data)
         self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
 
+        # Normaliza os nomes das colunas para evitar problemas com espaços extras
+        self.registrar_log("Normalizando nomes das colunas...")
+        df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
+        self.registrar_log("Nomes das colunas normalizados.")
+
         # ----- Início da Limpeza e Formatação herdada da função original -----
         self.registrar_log("Limpando e formatando o DataFrame final...")
         for col in df.columns:
