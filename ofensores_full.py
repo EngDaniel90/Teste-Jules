@@ -623,6 +623,15 @@ def enviar_email(dados, log_processo):
 
         disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_status'].items()])
 
+        # Caixa de destaque para o total de pendências
+        total_pending_petrobras = dados['status_counts'].get('Pending PB Reply', 0)
+        caixa_total_pending_html = f"""
+        <div style="border: 2px solid #FFC300; background-color: #FFF9E6; padding: 10px; margin-top: 15px; text-align: center;">
+            <h3 style="margin: 0; color: #D35400; font-family: Calibri, sans-serif;">TOTAL PENDING PETROBRAS</h3>
+            <p style="font-size: 24px; font-weight: bold; margin: 5px 0; font-family: Calibri, sans-serif;">{total_pending_petrobras}</p>
+        </div>
+        """
+
         secao_op_check_html = ""
         df_op_check = dados.get("df_op_check")
         if df_op_check is not None and not df_op_check.empty:
@@ -682,6 +691,8 @@ def enviar_email(dados, log_processo):
             <p class="mention">@Acompanhamento Design Review TS</p>
             <p>Prezados,</p>
             <p>Segue a atualização diária das pendências do <b>Design Review TS</b>:</p>
+
+            {caixa_total_pending_html}
 
             {secao_op_check_html}
             {secao_esup_check_html}
