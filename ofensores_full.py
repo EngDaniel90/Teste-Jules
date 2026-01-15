@@ -18,7 +18,6 @@ PATH_EHOUSE_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_
 PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
 PATH_VENDORS_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_Vendors.xlsx"
 PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
-PATH_LAST_RUN = r"C:\Users\E797\Downloads\Teste mensagem e print\last_run.txt"
 PATH_FECHAMENTO_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\fechamento_operacao.png"
 EMAIL_DESTINO = "279a5359.petrobras.com.br@br.teams.ms"
 EMAIL_LOG = "658b4ef7.petrobras.com.br@br.teams.ms"
@@ -806,53 +805,43 @@ def enviar_mensagem_julius(dados):
         print(f"ERRO CRÍTICO ao enviar e-mail para Julius: {str(e)}\n{erro_detalhado}")
 
 
-def verificar_e_executar():
-    """
-    Verifica se a automação já foi executada hoje e, caso contrário,
-    executa os fluxos de relatório.
-    """
-    hoje_str = datetime.now().strftime('%Y-%m-%d')
-    try:
-        with open(PATH_LAST_RUN, 'r') as f:
-            last_run_date = f.read().strip()
-        if last_run_date == hoje_str:
-            print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Automação já executada hoje. Próxima execução amanhã.")
-            return
-    except FileNotFoundError:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Arquivo 'last_run.txt' não encontrado. Executando pela primeira vez.")
-
-    # --- EXECUÇÃO DOS FLUXOS ---
-    log_geral = []
+# --- EXECUÇÃO PRINCIPAL ---
+if __name__ == "__main__":
+    print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
 
     # --- FLUXO 1: Relatório Principal (Topside) ---
-    print("\n--- [FLUXO 1/3] Processando Relatório Principal (Topside) ---")
+    print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
     dados_topside, log_topside, sucesso_topside = processar_dados()
     if sucesso_topside:
         print("-> Dados Topside processados com sucesso.")
-        log_geral.extend(log_topside)
 
         # Geração do novo gráfico de fechamento
         sucesso_fechamento, log_fechamento = gerar_grafico_fechamento_operacao(dados_topside['df_full'])
-        log_geral.extend(log_fechamento)
+        log_total_topside = log_topside + log_fechamento
         if not sucesso_fechamento:
             print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO DE FECHAMENTO !!!")
             # A falha aqui não impede o envio do e-mail principal, mas o erro será logado.
 
         sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
-        log_geral.extend(log_dashboard)
+        log_total_topside += log_dashboard
         if sucesso_dashboard:
             print("-> Dashboard Topside gerado com sucesso.")
-            enviar_email(dados_topside, log_geral)
-            enviar_mensagem_julius(dados_topside)
         else:
             print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
-            enviar_email_de_falha(log_geral)
+        enviar_email(dados_topside, log_total_topside)
     else:
         print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
         enviar_email_de_falha(log_topside)
 
-    # --- FLUXO 2: Relatório E-House ---
-    print("\n--- [FLUXO 2/3] Processando Relatório E-House ---")
+    # --- FLUXO 2: E-mail para Julius ---
+    print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
+    if sucesso_topside:
+        enviar_mensagem_julius(dados_topside)
+    else:
+        print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
+
+    # --- FLUXO 3: Relatório E-House ---
+    print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
     try:
         dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
         if sucesso_ehouse:
@@ -870,9 +859,8 @@ def verificar_e_executar():
         print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE: {e} !!!")
         enviar_email_de_falha([str(e)])
 
-
-    # --- FLUXO 3: Relatório Vendors ---
-    print("\n--- [FLUXO 3/3] Processando Relatório Vendors ---")
+    # --- FLUXO 4: Relatório Vendors ---
+    print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
     try:
         dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
         if sucesso_vendors:
@@ -889,20 +877,5 @@ def verificar_e_executar():
     except Exception as e:
         print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE VENDORS: {e} !!!")
         enviar_email_de_falha([str(e)])
-
-    # Atualiza o arquivo de controle
-    with open(PATH_LAST_RUN, 'w') as f:
-        f.write(hoje_str)
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Arquivo 'last_run.txt' atualizado.")
-
-
-# --- EXECUÇÃO PRINCIPAL ---
-if __name__ == "__main__":
-    print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
-    hora_atual = datetime.now().hour
-
-    # A lógica de agendamento (entre 7h e 9h) foi simplificada para rodar sempre
-    # que o script for chamado, mas apenas uma vez por dia.
-    verificar_e_executar()
 
     print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
