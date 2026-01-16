@@ -168,25 +168,62 @@ class AutomacaoPunchList:
     def tratar_dados(self, raw_data, colunas_desejadas):
         self.registrar_log("Processando e estruturando dados recebidos...")
 
+        if not raw_data:
+            self.registrar_log("AVISO: Não há dados para processar. Criando planilha com cabeçalhos.")
+            return pd.DataFrame(columns=colunas_desejadas)
+
         # Normaliza os dados brutos usando json_normalize
         df = pd.json_normalize(raw_data)
         self.registrar_log(f"Dados brutos normalizados. DataFrame inicial com {df.shape[0]} linhas e {df.shape[1]} colunas.")
 
-        # Cria um mapeamento 'fuzzy' entre os nomes das colunas desejadas e as colunas reais do DataFrame
+        # Mapeamento inteligente de colunas
         col_map = {}
-        df_cols_normalized = {re.sub(r'[^a-zA-Z0-9]', '', col).lower(): col for col in df.columns}
+        mapped_original_cols = set()
 
+        # Função helper para normalização
+        def normalize(text):
+            return re.sub(r'[^a-zA-Z0-9]', '', text).lower()
+
+        # Estratégia 1: Mapear campos complexos (ex: 'Autor' para 'Autor.Title')
         for col_desejada in colunas_desejadas:
-            col_desejada_normalized = re.sub(r'[^a-zA-Z0-9]', '', col_desejada).lower()
-            if col_desejada_normalized in df_cols_normalized:
-                col_map[df_cols_normalized[col_desejada_normalized]] = col_desejada
+            normalized_desejada = normalize(col_desejada)
+            for original_col in df.columns:
+                if original_col in mapped_original_cols:
+                    continue
+
+                # Prioriza a correspondência com '.Title' para campos de lookup/pessoa
+                if '.Title' in original_col:
+                    base_name = original_col.split('.Title')[0]
+                    if normalize(base_name) == normalized_desejada:
+                        col_map[original_col] = col_desejada
+                        mapped_original_cols.add(original_col)
+                        break # Próxima coluna desejada
+
+        # Estratégia 2: Mapear campos simples por correspondência direta
+        for col_desejada in colunas_desejadas:
+            if col_desejada in col_map.values():
+                continue # Já foi mapeado
+
+            normalized_desejada = normalize(col_desejada)
+            for original_col in df.columns:
+                if original_col in mapped_original_cols:
+                    continue
+
+                if normalize(original_col) == normalized_desejada:
+                    col_map[original_col] = col_desejada
+                    mapped_original_cols.add(original_col)
+                    break # Próxima coluna desejada
 
         # Renomeia as colunas do DataFrame de acordo com o mapeamento
         df.rename(columns=col_map, inplace=True)
 
-        # Filtra o DataFrame para manter apenas as colunas desejadas que foram encontradas
-        colunas_finais = [col for col in colunas_desejadas if col in df.columns]
-        df = df[colunas_finais]
+        # Garante que todas as colunas desejadas existam, adicionando as que estiverem faltando
+        for col in colunas_desejadas:
+            if col not in df.columns:
+                df[col] = ''  # Adiciona a coluna vazia
+
+        # Reordena e filtra o DataFrame para garantir que ele tenha exatamente as colunas desejadas na ordem correta
+        df = df[colunas_desejadas]
 
         self.registrar_log("Limpando e formatando o DataFrame final...")
         for col in df.columns:
