@@ -449,6 +449,16 @@ class AutomacaoPunchList:
         self.registrar_log("Enriquecimento de dados concluído.")
         return base_results
 
+    def _sanitize_header(self, header_text):
+        """Remove caracteres inválidos para cabeçalhos de tabela do Excel e garante unicidade."""
+        if not isinstance(header_text, str):
+            header_text = str(header_text)
+        # Remove caracteres inválidos para nomes de tabelas/cabeçalhos do Excel
+        invalid_chars = r'[\[\]/\\*?:\']'
+        sanitized = re.sub(invalid_chars, '', header_text)
+        # Trunca para o limite de 255 caracteres do Excel
+        return sanitized[:255]
+
     def iniciar_sessao_navegador(self):
         if not os.path.exists(CAMINHO_DRIVER_FIXO):
             self.registrar_log(f"ERRO CRÍTICO: Driver não encontrado em {CAMINHO_DRIVER_FIXO}")
@@ -588,71 +598,77 @@ class AutomacaoPunchList:
 
     def formatar_arquivos_como_tabela(self):
         """
-        Percorre pastas de destino, abre arquivos Excel e formata os dados como Tabela.
-        Nome da tabela: Tabela_query.
+        Percorre pastas, limpa cabeçalhos e formata os dados como Tabela 'Tabela_query'.
         """
-        self.registrar_log("--- Iniciando formatação de tabelas nos arquivos Excel ---")
+        self.registrar_log("--- Iniciando formatação de tabelas (com limpeza de cabeçalho) ---")
+        estilo = TableStyleInfo(name="TableStyleMedium9", showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
 
-        estilo = TableStyleInfo(
-            name="TableStyleMedium9",
-            showFirstColumn=False,
-            showLastColumn=False,
-            showRowStripes=True,
-            showColumnStripes=False
-        )
-
-        # Itera sobre as pastas de destino configuradas
         for pasta in PASTAS_DESTINO:
             if not os.path.exists(pasta):
-                self.registrar_log(f"AVISO: A pasta de formatação '{pasta}' não foi encontrada. Pulando...")
+                self.registrar_log(f"AVISO: Pasta de formatação '{pasta}' não encontrada. Pulando...")
                 continue
-
             self.registrar_log(f"Verificando arquivos para formatação em: {pasta}")
 
-            # Itera sobre os arquivos que o script deve ter baixado
             for config_lista in LISTAS_SHAREPOINT.values():
                 arquivo_nome = config_lista["arquivo_saida"]
                 caminho_completo = os.path.join(pasta, arquivo_nome)
-
                 if not os.path.exists(caminho_completo):
                     self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' não encontrado em '{pasta}'.")
                     continue
 
                 try:
                     wb = openpyxl.load_workbook(caminho_completo)
-                    # O script gera arquivos com uma única aba relevante
                     sheet = wb.active
-
-                    if sheet.max_row < 2:
-                        self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' não possui dados suficientes para criar tabela.")
+                    if sheet.max_row < 1:
+                        self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' está vazio ou sem cabeçalhos.")
                         continue
 
-                    # Verifica se já existe uma tabela com o nome correto
                     if "Tabela_query" in sheet.tables:
-                        self.registrar_log(f"INFO: Arquivo '{arquivo_nome}' já possui a 'Tabela_query' formatada.")
-                        continue # Já está como queremos
-
-                    # Se existe alguma tabela, mas com outro nome, renomeia
-                    if sheet.tables:
-                        tabela_existente = list(sheet.tables.values())[0]
-                        nome_antigo = tabela_existente.name
-                        tabela_existente.name = "Tabela_query"
-                        tabela_existente.displayName = "Tabela_query"
-                        wb.save(caminho_completo)
-                        self.registrar_log(f"SUCESSO: Tabela '{nome_antigo}' renomeada para 'Tabela_query' em '{arquivo_nome}'.")
+                        self.registrar_log(f"INFO: Arquivo '{arquivo_nome}' já possui 'Tabela_query' formatada.")
                         continue
 
-                    # Se não há nenhuma tabela, cria uma
-                    referencia = f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
-                    tab = Table(displayName="Tabela_query", ref=referencia)
-                    tab.tableStyleInfo = estilo
-                    sheet.add_table(tab)
+                    # --- Lógica de Limpeza e Desduplicação de Cabeçalho ---
+                    headers = [cell.value for cell in sheet[1]]
+                    novos_headers = []
+                    seen_headers = set()
+
+                    for header in headers:
+                        sanitized = self._sanitize_header(header)
+
+                        # Garante unicidade
+                        final_header = sanitized
+                        counter = 2
+                        while final_header in seen_headers:
+                            final_header = f"{sanitized}_{counter}"
+                            counter += 1
+
+                        novos_headers.append(final_header)
+                        seen_headers.add(final_header)
+
+                    # Escreve os cabeçalhos limpos de volta na planilha
+                    for col_idx, new_header_text in enumerate(novos_headers, 1):
+                        sheet.cell(row=1, column=col_idx, value=new_header_text)
+
+                    # Se houver tabelas existentes com outros nomes, removemos para evitar conflitos
+                    if sheet.tables:
+                        for table_name in list(sheet.tables.keys()):
+                            self.registrar_log(f"INFO: Removendo tabela antiga '{table_name}' para recriar com cabeçalhos limpos.")
+                            del sheet.tables[table_name]
+
+                    # Cria a nova tabela com os cabeçalhos já limpos
+                    if sheet.max_row > 0:
+                        referencia = f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
+                        tab = Table(displayName="Tabela_query", ref=referencia)
+                        tab.tableStyleInfo = estilo
+                        sheet.add_table(tab)
+                        self.registrar_log(f"SUCESSO: Cabeçalhos limpos e 'Tabela_query' criada em '{arquivo_nome}'.")
+                    else:
+                        self.registrar_log(f"AVISO: Sem dados para criar a tabela em '{arquivo_nome}'.")
 
                     wb.save(caminho_completo)
-                    self.registrar_log(f"SUCESSO: Dados em '{arquivo_nome}' formatados como 'Tabela_query'.")
 
                 except Exception as e:
-                    self.registrar_log(f"ERRO CRÍTICO ao formatar o arquivo '{arquivo_nome}': {e}")
+                    self.registrar_log(f"ERRO CRÍTICO ao formatar '{arquivo_nome}': {e}")
         self.registrar_log("--- Formatação de tabelas concluída ---")
 
 
