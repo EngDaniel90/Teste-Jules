@@ -543,7 +543,7 @@ class AutomacaoPunchList:
                         col_info = self.get_col_info(source_name)
 
                         if not col_info:
-                            missing_columns.append(nome_coluna)
+                            missing_columns.append(source_name)
                             continue
 
                         internal_name = col_info['internal_name']
