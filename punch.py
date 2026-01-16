@@ -3,10 +3,11 @@ import sys
 import time
 import shutil
 import urllib3
-import urllib.request
+import urllib.parse
 import requests
 import pandas as pd
 from datetime import datetime
+import re
 
 # Importação para comunicação com Outlook Local
 try:
@@ -27,10 +28,15 @@ os.environ['WDM_SSL_VERIFY'] = '0'
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # --- CONFIGURAÇÕES DO AMBIENTE ---
-URL_LOGIN_SEATRIUM = "https://seatrium.sharepoint.com/sites/P84P85DesignReview/Lists/DR90%20EHouse%20Punchlist/AllItems.aspx?e=bTNUys&CID=98bfe3a1%2D508a%2D6000%2D2c51%2D857abb203708&cidOR=SPO&ovuser=5b6f6241%2D57be4%2D8e50%2D1dfa72e79a57%2Cdaniel%2Eanversi%40petrobras%2Ecom%2Ebr&OR=Teams%2DHL&CT=1766373503454&clickparams=eyJBcHBOYW1lIjoiVGVhbXMtRGVza3RvcCIsIkFwcFZlcnNpb24iOiI0OS8yNTExMzAwMTMxMiIsIkhhc0ZlZGVyYXRlZFVzZXIiOnRydWV9"
+URL_LOGIN_SEATRIUM = "https://seatrium.sharepoint.com/sites/P84P85DesignReview/Lists/DR90%20EHouse%20Punchlist/AllItems.aspx"
 URL_BASE_SHAREPOINT = "https://seatrium.sharepoint.com/sites/P84P85DesignReview"
 
-PASTA_DESTINO = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches"
+# --- CONFIGURAÇÃO DAS PASTAS DE DESTINO (LISTA) ---
+PASTAS_DESTINO = [
+    r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches",
+    r"C:\Users\E797\Downloads\Teste mensagem e print"
+]
+
 CAMINHO_DRIVER_FIXO = r"C:\Users\E797\PycharmProjects\pythonProject\msedgedriver.exe"
 EMAIL_DESTINO = '658b4ef7.petrobras.com.br@br.teams.ms'
 
@@ -90,13 +96,20 @@ class AutomacaoPunchList:
     def __init__(self):
         self.driver = None
         self.log_sessao = []
-        self.mapeamento_colunas = {}
+        self.schema_lista = {}
 
     def registrar_log(self, mensagem):
         timestamp = datetime.now().strftime('%H:%M:%S')
         texto = f"[{timestamp}] {mensagem}"
         print(texto)
         self.log_sessao.append(texto)
+
+    def normalize_key(self, text):
+        """Remove símbolos e espaços para comparação robusta."""
+        if not text:
+            return ""
+        # Mantém apenas letras e números, minúsculo
+        return "".join(c for c in text if c.isalnum()).lower()
 
     def enviar_via_outlook_app(self, sucesso):
         status_geral = "SUCESSO" if sucesso else "FALHA"
@@ -105,7 +118,6 @@ class AutomacaoPunchList:
         log_html_lines = []
         for linha in self.log_sessao:
             classe_css = ""
-            # Remove o timestamp para a verificação de palavras-chave
             linha_sem_ts = linha.split("] ", 1)[-1] if "] " in linha else linha
 
             if "SUCESSO" in linha_sem_ts:
@@ -161,51 +173,140 @@ class AutomacaoPunchList:
         except Exception as e:
             self.registrar_log(f"Falha ao enviar e-mail via Outlook Desktop: {e}")
 
-    def tratar_dados(self, df, colunas_desejadas):
-        self.registrar_log("Limpando e formatando dados...")
+    def get_col_info(self, display_name):
+        """Busca informações da coluna usando lógica fuzzy."""
+        # 1. Tenta match exato
+        col_info = self.schema_lista.get(display_name)
+        if col_info:
+            return col_info
 
-        df = df.rename(columns=self.mapeamento_colunas)
-        colunas_existentes = [c for c in colunas_desejadas if c in df.columns]
-        df = df[colunas_existentes].copy()
+        # 2. Tenta match normalizado (sem espaços, minúsculo, sem símbolos)
+        normalized_target = self.normalize_key(display_name)
+        for k, v in self.schema_lista.items():
+            if self.normalize_key(k) == normalized_target:
+                return v
 
+        return None
+
+    def tratar_dados(self, raw_data, colunas_desejadas):
+        self.registrar_log("Processando e estruturando dados recebidos...")
+        processed_data = []
+
+        # Itera sobre cada item (linha) retornado pela API
+        for item in raw_data:
+            new_row = {}
+            # Itera sobre as colunas que o usuário deseja no resultado final
+            for display_name in colunas_desejadas:
+
+                col_info = self.get_col_info(display_name)
+
+                # Se achou no schema, usa o nome interno oficial
+                if col_info:
+                    internal_name = col_info['internal_name']
+                    col_type = col_info['type']
+                else:
+                    # Se NÃO achou no schema, tenta adivinhar o InternalName ou buscar nas chaves do item
+                    # Isso ajuda quando o schema falhou mas o dado veio via "Select *"
+                    internal_name = None
+                    col_type = 'Text'  # Assumir texto
+
+                    # Tenta achar uma chave no item que pareça com o nome desejado
+                    normalized_target = self.normalize_key(display_name)
+                    for k in item.keys():
+                        if self.normalize_key(k) == normalized_target:
+                            internal_name = k
+                            break
+
+                # Tenta pegar o valor
+                value = None
+                if internal_name:
+                    value = item.get(internal_name)
+
+                # Se não temos internal_name ou valor, tentamos pelo display_name direto (raro)
+                if value is None:
+                    value = item.get(display_name)
+
+                # Tratamento robusto para campos complexos (Pessoa/Grupo, Pesquisa)
+                if col_type in ['User', 'Lookup', 'UserMulti', 'LookupMulti']:
+                    if value and isinstance(value, dict):
+                        if 'results' in value:
+                            results = value.get('results', [])
+                            new_row[display_name] = '; '.join([v.get('Title', str(v)) for v in results])
+                        else:
+                            new_row[display_name] = value.get('Title', '')
+                    else:
+                        # Fallback ID
+                        val_id = item.get(f"{internal_name}Id") if internal_name else None
+                        if val_id:
+                            new_row[display_name] = f"ID: {val_id}"
+                        elif value is not None:
+                            new_row[display_name] = str(value)
+                        else:
+                            new_row[display_name] = ''
+
+                elif col_type == 'MultiChoice' and value and isinstance(value, dict):
+                    results = value.get('results', [])
+                    new_row[display_name] = '; '.join([str(v) for v in results])
+
+                else:
+                    new_row[display_name] = value if value is not None else ''
+
+            processed_data.append(new_row)
+
+        df = pd.DataFrame(processed_data)
+        self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
+
+        # Normaliza colunas
+        df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
+
+        # ----- Limpeza e Formatação -----
+        self.registrar_log("Limpando e formatando o DataFrame final...")
         for col in df.columns:
-            df.loc[:, col] = df[col].astype(str)
-            df.loc[df[col].str.contains("error", case=False, na=False), col] = ""
+            df[col] = df[col].astype(str).fillna('')
+            df.loc[df[col].str.contains("error|#error", case=False, na=False), col] = ""
 
-            if "Date" in col or df[col].str.contains(r'\d{4}-\d{2}-\d{2}T', na=False).any():
+            is_date_col = "Date" in col or "Target" in col
+            contains_iso_date = df[col].str.contains(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z', na=False).any()
+
+            if is_date_col or contains_iso_date:
                 try:
-                    # Especifica o formato para evitar UserWarning e garantir a conversão correta
-                    df_dt = pd.to_datetime(df[col], format='%Y-%m-%dT%H:%M:%SZ', errors='coerce', utc=True)
-                    mask = df_dt.notna()
-                    df.loc[mask, col] = df_dt[mask].dt.strftime('%d/%m/%Y')
-                    df.loc[:, col] = df[col].replace(['NaT', 'nan', 'None', 'nan/nan/nan'], "")
-                except Exception:  # Captura exceções caso o formato não seja consistente
+                    dt_series = pd.to_datetime(df[col], format='%Y-%m-%dT%H:%M:%SZ', errors='coerce', utc=True)
+                    valid_dates = dt_series.notna()
+                    df.loc[valid_dates, col] = dt_series[valid_dates].dt.strftime('%d/%m/%Y')
+                    df[col] = df[col].replace(['NaT', 'nan', 'None', ''], pd.NA)
+                except Exception:
                     continue
 
+        self.registrar_log("Limpeza e formatação concluídas.")
         return df
 
-    def obter_mapeamento_colunas(self, session, base_url, nome_api):
-        self.registrar_log(f"Obtendo mapeamento de colunas para a lista '{nome_api}'...")
-        endpoint = f"{base_url}/_api/web/lists/getbytitle('{nome_api}')/fields"
+    def obter_schema_lista(self, session, base_url, nome_api):
+        self.registrar_log(f"Obtendo schema da lista '{nome_api}'...")
+        safe_nome_api = urllib.parse.quote(nome_api)
+        endpoint = f"{base_url}/_api/web/lists/getbytitle('{safe_nome_api}')/fields"
+        headers = {"Accept": "application/json;odata=verbose"}
         try:
-            headers = {"Accept": "application/json;odata=verbose"}
             response = session.get(endpoint, headers=headers)
             if response.status_code == 200:
                 fields = response.json()['d']['results']
-                self.mapeamento_colunas = {f['InternalName']: f['Title'] for f in fields}
-                self.registrar_log("Dicionário de colunas sincronizado.")
+                self.schema_lista = {f['Title']: {
+                    'internal_name': f['InternalName'],
+                    'type': f.get('TypeAsString', 'Text'),
+                    'static_name': f.get('StaticName', '')
+                } for f in fields}
+                self.registrar_log(f"Schema obtido. {len(self.schema_lista)} campos mapeados.")
                 return True
             else:
                 self.registrar_log(
-                    f"Falha ao mapear schema do SharePoint para '{nome_api}'. Status: {response.status_code}")
+                    f"Falha ao obter schema para '{nome_api}'. Status: {response.status_code}")
                 return False
         except Exception as e:
-            self.registrar_log(f"Erro no mapeamento para '{nome_api}': {e}")
+            self.registrar_log(f"Erro ao obter schema para '{nome_api}': {e}")
             return False
 
     def iniciar_sessao_navegador(self):
         if not os.path.exists(CAMINHO_DRIVER_FIXO):
-            self.registrar_log("Driver não encontrado!")
+            self.registrar_log(f"ERRO CRÍTICO: Driver não encontrado em {CAMINHO_DRIVER_FIXO}")
             return
 
         edge_options = Options()
@@ -218,7 +319,12 @@ class AutomacaoPunchList:
 
             self.registrar_log("Aguardando login na Seatrium...")
             wait = WebDriverWait(self.driver, 120)
-            wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "[role='grid']")))
+
+            wait.until(EC.presence_of_element_located((
+                By.CSS_SELECTOR,
+                "[role='grid'], #O365_MainLink_Me, #O365_HeaderLeftRegion, #spCommandBar"
+            )))
+
             self.registrar_log("Sessão autenticada detectada.")
         except Exception as e:
             self.registrar_log(f"Erro no navegador: {e}")
@@ -229,15 +335,24 @@ class AutomacaoPunchList:
         ciclo_sucesso = True
 
         try:
+            if not self.driver:
+                self.registrar_log("Driver não inicializado.")
+                return
+
             cookies = self.driver.get_cookies()
             session = requests.Session()
             session.verify = False
             for cookie in cookies:
                 session.cookies.set(cookie['name'], cookie['value'])
 
-            if not os.path.exists(PASTA_DESTINO):
-                os.makedirs(PASTA_DESTINO)
-                self.registrar_log(f"Pasta de destino criada em: {PASTA_DESTINO}")
+            # Verifica e cria todas as pastas de destino se não existirem
+            for pasta in PASTAS_DESTINO:
+                if not os.path.exists(pasta):
+                    try:
+                        os.makedirs(pasta)
+                        self.registrar_log(f"Pasta criada: {pasta}")
+                    except Exception as e:
+                        self.registrar_log(f"ERRO ao criar pasta {pasta}: {e}")
 
             for nome_lista, config in LISTAS_SHAREPOINT.items():
                 self.registrar_log(f"--- Iniciando processamento da lista: {nome_lista} ---")
@@ -246,47 +361,118 @@ class AutomacaoPunchList:
                 colunas_desejadas = config["colunas"]
 
                 try:
-                    if not self.obter_mapeamento_colunas(session, URL_BASE_SHAREPOINT, nome_api):
+                    safe_nome_api = urllib.parse.quote(nome_api)
+
+                    if not self.obter_schema_lista(session, URL_BASE_SHAREPOINT, nome_api):
                         ciclo_sucesso = False
                         continue
 
-                    self.registrar_log(f"Baixando dados da lista '{nome_api}'...")
-                    endpoint = f"{URL_BASE_SHAREPOINT}/_api/web/lists/getbytitle('{nome_api}')/items?$top=5000"
+                    self.registrar_log(f"Construindo query para '{nome_api}'...")
+
+                    expand_parts = []
+                    missing_columns = []
+
+                    # 1. Identificar colunas e montar Expands
+                    for nome_coluna in colunas_desejadas:
+                        col_info = self.get_col_info(nome_coluna)
+
+                        if not col_info:
+                            missing_columns.append(nome_coluna)
+                            continue
+
+                        internal_name = col_info['internal_name']
+                        col_type = col_info['type']
+
+                        if col_type in ['User', 'Lookup', 'UserMulti', 'LookupMulti']:
+                            expand_parts.append(internal_name)
+
+                    if missing_columns:
+                        self.registrar_log(
+                            f"AVISO: {len(missing_columns)} colunas não foram encontradas no Schema (serão buscadas via 'Select *'):")
+                        for mc in missing_columns:
+                            self.registrar_log(f"   - {mc}")
+
+                    # 2. Query Estratégia "SELECT ALL"
+                    # Seleciona TUDO (*) + ID + Expansões específicas
+                    query_params = ["$top=5000"]
+
+                    select_clause = "Id,*"
+                    # Adiciona os campos expandidos no select (necessário para pegar Title)
+                    expanded_selects = [f"{exp}/Title" for exp in expand_parts]
+                    if expanded_selects:
+                        select_clause += "," + ",".join(expanded_selects)
+
+                    query_params.append(f"$select={select_clause}")
+
+                    if expand_parts:
+                        expand_str = ','.join(list(set(expand_parts)))
+                        query_params.append(f"$expand={expand_str}")
+
+                    endpoint = f"{URL_BASE_SHAREPOINT}/_api/web/lists/getbytitle('{safe_nome_api}')/items?{'&'.join(query_params)}"
                     headers = {"Accept": "application/json;odata=verbose"}
+
+                    self.registrar_log(f"Baixando dados (Modo Completo)...")
                     response = session.get(endpoint, headers=headers)
+
+                    results = []
+                    sucesso_download = False
 
                     if response.status_code == 200:
                         results = response.json().get('d', {}).get('results', [])
-                        if results:
-                            df_raw = pd.json_normalize(results)
-                            df_final = self.tratar_dados(df_raw, colunas_desejadas)
-
-                            caminho_final = os.path.join(PASTA_DESTINO, arquivo_saida)
-                            try:
-                                df_final.to_excel(caminho_final, index=False)
-                                self.registrar_log(f"SUCESSO: Planilha '{nome_lista}' salva em: {caminho_final}")
-                            except PermissionError:
-                                self.registrar_log(
-                                    f"ERRO: O arquivo '{arquivo_saida}' está aberto. Feche-o para salvar.")
-                                ciclo_sucesso = False
-                            except Exception as e_save:
-                                self.registrar_log(f"ERRO ao salvar o arquivo '{arquivo_saida}': {e_save}")
-                                ciclo_sucesso = False
-                        else:
-                            self.registrar_log(f"AVISO: A lista '{nome_lista}' retornou vazia.")
-                    else:
+                        sucesso_download = True
+                    elif response.status_code == 400:
                         self.registrar_log(
-                            f"ERRO: Falha ao baixar dados da lista '{nome_lista}'. Status API: {response.status_code}")
+                            "AVISO: Erro 400. Muitos campos 'Pessoa/Lookup'. Tentando modo simplificado (IDs).")
+
+                        # Fallback: Select * SEM Expands
+                        endpoint_fallback = f"{URL_BASE_SHAREPOINT}/_api/web/lists/getbytitle('{safe_nome_api}')/items?$top=5000"
+                        response_fallback = session.get(endpoint_fallback, headers=headers)
+
+                        if response_fallback.status_code == 200:
+                            results = response_fallback.json().get('d', {}).get('results', [])
+                            sucesso_download = True
+                            self.registrar_log("Dados brutos recuperados com sucesso.")
+                        else:
+                            self.registrar_log(f"ERRO: Fallback falhou. Status: {response_fallback.status_code}")
+                    else:
+                        self.registrar_log(f"ERRO: Falha ao baixar dados. Status API: {response.status_code}")
+
+                    if sucesso_download:
+                        if results:
+                            df_final = self.tratar_dados(results, colunas_desejadas)
+
+                            # --- LOOP PARA SALVAR EM MÚLTIPLOS DESTINOS ---
+                            for pasta_destino in PASTAS_DESTINO:
+                                caminho_final = os.path.join(pasta_destino, arquivo_saida)
+                                try:
+                                    # Cria pasta se não existir na hora H (garantia extra)
+                                    if not os.path.exists(pasta_destino):
+                                        os.makedirs(pasta_destino)
+
+                                    df_final.to_excel(caminho_final, index=False)
+                                    self.registrar_log(f"SUCESSO: Planilha '{nome_lista}' salva em: {caminho_final}")
+                                except PermissionError:
+                                    self.registrar_log(
+                                        f"ERRO DE PERMISSÃO: O arquivo '{arquivo_saida}' está aberto em {pasta_destino}. Feche-o.")
+                                    # Não marcamos ciclo_sucesso = False aqui para permitir que salve nas outras pastas se possível
+                                    # Mas se for crítico, pode descomentar a linha abaixo:
+                                    # ciclo_sucesso = False
+                                except Exception as e_save:
+                                    self.registrar_log(f"ERRO ao salvar arquivo em {pasta_destino}: {e_save}")
+                                    ciclo_sucesso = False
+                        else:
+                            self.registrar_log(f"AVISO: A lista '{nome_lista}' está vazia.")
+                    else:
                         ciclo_sucesso = False
 
                 except Exception as e_lista:
-                    self.registrar_log(f"ERRO: Falha inesperada no processamento da lista '{nome_lista}': {e_lista}")
+                    self.registrar_log(f"ERRO CRÍTICO na lista '{nome_lista}': {e_lista}")
                     ciclo_sucesso = False
                 finally:
-                    self.registrar_log(f"--- Finalizado processamento da lista: {nome_lista} ---\n")
+                    self.registrar_log(f"--- Fim lista: {nome_lista} ---\n")
 
         except Exception as e_ciclo:
-            self.registrar_log(f"Falha crítica no ciclo de extração: {e_ciclo}")
+            self.registrar_log(f"Falha crítica no ciclo: {e_ciclo}")
             ciclo_sucesso = False
         finally:
             self.enviar_via_outlook_app(ciclo_sucesso)
@@ -294,9 +480,7 @@ class AutomacaoPunchList:
     def executar(self):
         self.iniciar_sessao_navegador()
         if self.driver:
-            # Executa imediatamente na primeira vez
             self.extrair_dados()
-
             while True:
                 print("Próximo ciclo em 10 minutos...")
                 time.sleep(600)
