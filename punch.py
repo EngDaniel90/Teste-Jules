@@ -72,7 +72,7 @@ LISTAS_SHAREPOINT = {
             "Action by", "Status", "Action Comment", "Date Cleared by ABB", "Days Since Date Cleared by ABB",
             "KBR Response", "KBR Response Date", "KBR Response by", "KBR Remarks", "KBR Category", "KBR Discipline",
             "KBR Screenshot", "Date Cleared by KBR", "Days Since Date Cleared By KBR", "Seatrium Discipline",
-            "Seatrium Remarks", "Checked By (Seatrium)", "Seatrium Comments", "Date Cleared By Seatrium",
+            "Seatrium Remarks", "Checked By (Seatrium)", "Seatrium Comments", ("DateClearBySeatrium", "Date Cleared By Seatrium"),
             "Days Since Date Cleared by Seatrium", "Petrobras Response", "Petrobras Response By",
             "Petrobras Screenshot",
             "Petrobras Response Date", "Petrobras Remarks", "Petrobras Discipline", "Petrobras Category",
@@ -90,7 +90,7 @@ LISTAS_SHAREPOINT = {
             "Date Cleared by KBR", "Days Since Date Cleared by KBR", "Petrobras Response", "Petrobras Response by",
             "Petrobras Response Date", "Petrobras Screenshot", "Remarks", "Petrobras Discipline", "Petrobras Category",
             "Date Cleared by Petrobras", "Seatrium Remarks", "Seatrium Discipline", "Checked By (Seatrium)",
-            "Seatrium Comments", "Date Cleared By Seatrium", "Days Since Date Cleared by Seatrium", "Modified By",
+            "Seatrium Comments", ("DateClearBySeatrium", "Date Cleared By Seatrium"), "Days Since Date Cleared by Seatrium", "Modified By",
             "Item Type", "Path"
         ]
     }
@@ -206,7 +206,7 @@ class AutomacaoPunchList:
         return value
 
     def tratar_dados(self, raw_data, colunas_desejadas):
-        self.registrar_log("Processando dados recebidos (modo inclusivo)...")
+        self.registrar_log("Processando dados recebidos (modo inclusivo com mapeamento)...")
         if not raw_data:
             self.registrar_log("AVISO: Nenhum dado bruto para processar.")
             return pd.DataFrame()
@@ -222,13 +222,21 @@ class AutomacaoPunchList:
             'odata.type', 'GUID', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl'
         }
 
+        # Extrai os nomes de exibição finais para reordenar o DataFrame mais tarde
+        final_display_names = [col[1] if isinstance(col, tuple) else col for col in colunas_desejadas]
+
         for item in raw_data:
             new_row = {}
             used_internal_names = set()
 
-            # ETAPA 1: Processar colunas desejadas na ordem correta
-            for display_name in colunas_desejadas:
-                col_info = self.get_col_info(display_name)
+            # ETAPA 1: Processar colunas desejadas (com ou sem mapeamento)
+            for col_config in colunas_desejadas:
+                if isinstance(col_config, tuple):
+                    source_name, display_name = col_config
+                else:
+                    source_name, display_name = col_config, col_config
+
+                col_info = self.get_col_info(source_name)
                 internal_name, col_type, value = None, 'Text', None
 
                 if col_info:
@@ -236,22 +244,22 @@ class AutomacaoPunchList:
                     col_type = col_info['type']
                     used_internal_names.add(internal_name)
                     used_internal_names.add(f"{internal_name}Id")
-                else:
-                    normalized_target = self.normalize_key(display_name)
+                else: # Fallback para correspondência normalizada se não estiver no schema
+                    normalized_target = self.normalize_key(source_name)
                     for k in item.keys():
                         if self.normalize_key(k) == normalized_target:
-                            internal_name, col_type = k, 'Text' # Assume Text se não estiver no schema
+                            internal_name, col_type = k, 'Text'
                             used_internal_names.add(internal_name)
                             break
 
-                value = item.get(internal_name) if internal_name else item.get(display_name)
+                value = item.get(internal_name) if internal_name else item.get(source_name)
 
                 processed_value = ''
                 if col_type in ['User', 'Lookup', 'UserMulti', 'LookupMulti']:
                     processed_value = self._simplify_sharepoint_value(value)
-                    if not processed_value: # Se o enriquecimento falhou, pode haver um ID
+                    if not processed_value:
                         val_id = item.get(f"{internal_name}Id") if internal_name else None
-                        if val_id: processed_value = f"ID: {val_id}"
+                        if val_id: processed_value = f"ID: {self._simplify_sharepoint_value(val_id)}"
                 elif value is not None:
                     processed_value = self._simplify_sharepoint_value(value)
 
@@ -274,8 +282,8 @@ class AutomacaoPunchList:
         df = pd.DataFrame(processed_data)
 
         if not df.empty:
-            # Reordenar para garantir que as colunas desejadas venham primeiro
-            final_ordered_columns = colunas_desejadas + sorted(list(all_extra_columns))
+            # Reordenar para garantir que as colunas desejadas venham primeiro, na ordem correta
+            final_ordered_columns = final_display_names + sorted(list(all_extra_columns))
             existing_cols = [col for col in final_ordered_columns if col in df.columns]
             df = df[existing_cols]
 
@@ -529,8 +537,10 @@ class AutomacaoPunchList:
                     missing_columns = []
 
                     # 1. Identificar colunas complexas (User/Lookup) e de usuário
-                    for nome_coluna in colunas_desejadas:
-                        col_info = self.get_col_info(nome_coluna)
+                    for col_config in colunas_desejadas:
+                        # Se for uma tupla de mapeamento (source, display), use a origem
+                        source_name = col_config[0] if isinstance(col_config, tuple) else col_config
+                        col_info = self.get_col_info(source_name)
 
                         if not col_info:
                             missing_columns.append(nome_coluna)
