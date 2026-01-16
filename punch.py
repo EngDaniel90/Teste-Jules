@@ -9,6 +9,11 @@ import pandas as pd
 from datetime import datetime
 import re
 
+# openpyxl imports
+import openpyxl
+from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.utils import get_column_letter
+
 # Importação para comunicação com Outlook Local
 try:
     import win32com.client as win32
@@ -471,11 +476,84 @@ class AutomacaoPunchList:
                 finally:
                     self.registrar_log(f"--- Fim lista: {nome_lista} ---\n")
 
+            # Após o download de todas as listas, inicia a formatação
+            self.formatar_arquivos_como_tabela()
+
         except Exception as e_ciclo:
             self.registrar_log(f"Falha crítica no ciclo: {e_ciclo}")
             ciclo_sucesso = False
         finally:
             self.enviar_via_outlook_app(ciclo_sucesso)
+
+    def formatar_arquivos_como_tabela(self):
+        """
+        Percorre pastas de destino, abre arquivos Excel e formata os dados como Tabela.
+        Nome da tabela: Tabela_query.
+        """
+        self.registrar_log("--- Iniciando formatação de tabelas nos arquivos Excel ---")
+
+        estilo = TableStyleInfo(
+            name="TableStyleMedium9",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False
+        )
+
+        # Itera sobre as pastas de destino configuradas
+        for pasta in PASTAS_DESTINO:
+            if not os.path.exists(pasta):
+                self.registrar_log(f"AVISO: A pasta de formatação '{pasta}' não foi encontrada. Pulando...")
+                continue
+
+            self.registrar_log(f"Verificando arquivos para formatação em: {pasta}")
+
+            # Itera sobre os arquivos que o script deve ter baixado
+            for config_lista in LISTAS_SHAREPOINT.values():
+                arquivo_nome = config_lista["arquivo_saida"]
+                caminho_completo = os.path.join(pasta, arquivo_nome)
+
+                if not os.path.exists(caminho_completo):
+                    self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' não encontrado em '{pasta}'.")
+                    continue
+
+                try:
+                    wb = openpyxl.load_workbook(caminho_completo)
+                    # O script gera arquivos com uma única aba relevante
+                    sheet = wb.active
+
+                    if sheet.max_row < 2:
+                        self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' não possui dados suficientes para criar tabela.")
+                        continue
+
+                    # Verifica se já existe uma tabela com o nome correto
+                    if "Tabela_query" in sheet.tables:
+                        self.registrar_log(f"INFO: Arquivo '{arquivo_nome}' já possui a 'Tabela_query' formatada.")
+                        continue # Já está como queremos
+
+                    # Se existe alguma tabela, mas com outro nome, renomeia
+                    if sheet.tables:
+                        tabela_existente = list(sheet.tables.values())[0]
+                        nome_antigo = tabela_existente.name
+                        tabela_existente.name = "Tabela_query"
+                        tabela_existente.displayName = "Tabela_query"
+                        wb.save(caminho_completo)
+                        self.registrar_log(f"SUCESSO: Tabela '{nome_antigo}' renomeada para 'Tabela_query' em '{arquivo_nome}'.")
+                        continue
+
+                    # Se não há nenhuma tabela, cria uma
+                    referencia = f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
+                    tab = Table(displayName="Tabela_query", ref=referencia)
+                    tab.tableStyleInfo = estilo
+                    sheet.add_table(tab)
+
+                    wb.save(caminho_completo)
+                    self.registrar_log(f"SUCESSO: Dados em '{arquivo_nome}' formatados como 'Tabela_query'.")
+
+                except Exception as e:
+                    self.registrar_log(f"ERRO CRÍTICO ao formatar o arquivo '{arquivo_nome}': {e}")
+        self.registrar_log("--- Formatação de tabelas concluída ---")
+
 
     def executar(self):
         self.iniciar_sessao_navegador()
