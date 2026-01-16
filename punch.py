@@ -193,75 +193,93 @@ class AutomacaoPunchList:
 
         return None
 
-    def tratar_dados(self, raw_data, colunas_desejadas):
-        self.registrar_log("Processando e estruturando dados recebidos...")
-        processed_data = []
+    def _simplify_sharepoint_value(self, value):
+        """Converte um valor potencialmente complexo do SharePoint em uma string simples."""
+        if value is None:
+            return ''
+        if isinstance(value, dict):
+            if 'results' in value and isinstance(value.get('results'), list):
+                return '; '.join([self._simplify_sharepoint_value(v) for v in value['results']])
+            return value.get('Title', str(value))
+        if isinstance(value, list):
+            return '; '.join([str(v) for v in value])
+        return value
 
-        # Itera sobre cada item (linha) retornado pela API
+    def tratar_dados(self, raw_data, colunas_desejadas):
+        self.registrar_log("Processando dados recebidos (modo inclusivo)...")
+        if not raw_data:
+            self.registrar_log("AVISO: Nenhum dado bruto para processar.")
+            return pd.DataFrame()
+
+        processed_data = []
+        all_extra_columns = set()
+
+        METADATA_BLOCKLIST = {
+            '__metadata', 'OData__UIVersionString', 'FirstUniqueAncestorSecurableObject',
+            'RoleAssignments', 'AttachmentFiles', 'ContentType', 'FieldValuesAsHtml',
+            'FieldValuesAsText', 'FieldValuesForEdit', 'File', 'Folder', 'ParentList',
+            'Properties', 'Versions', 'odata.editLink', 'odata.etag', 'odata.id',
+            'odata.type', 'GUID', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl'
+        }
+
         for item in raw_data:
             new_row = {}
-            # Itera sobre as colunas que o usuário deseja no resultado final
+            used_internal_names = set()
+
+            # ETAPA 1: Processar colunas desejadas na ordem correta
             for display_name in colunas_desejadas:
-
                 col_info = self.get_col_info(display_name)
+                internal_name, col_type, value = None, 'Text', None
 
-                # Se achou no schema, usa o nome interno oficial
                 if col_info:
                     internal_name = col_info['internal_name']
                     col_type = col_info['type']
+                    used_internal_names.add(internal_name)
+                    used_internal_names.add(f"{internal_name}Id")
                 else:
-                    # Se NÃO achou no schema, tenta adivinhar o InternalName ou buscar nas chaves do item
-                    # Isso ajuda quando o schema falhou mas o dado veio via "Select *"
-                    internal_name = None
-                    col_type = 'Text'  # Assumir texto
-
-                    # Tenta achar uma chave no item que pareça com o nome desejado
                     normalized_target = self.normalize_key(display_name)
                     for k in item.keys():
                         if self.normalize_key(k) == normalized_target:
-                            internal_name = k
+                            internal_name, col_type = k, 'Text' # Assume Text se não estiver no schema
+                            used_internal_names.add(internal_name)
                             break
 
-                # Tenta pegar o valor
-                value = None
-                if internal_name:
-                    value = item.get(internal_name)
+                value = item.get(internal_name) if internal_name else item.get(display_name)
 
-                # Se não temos internal_name ou valor, tentamos pelo display_name direto (raro)
-                if value is None:
-                    value = item.get(display_name)
-
-                # Tratamento robusto para campos complexos (Pessoa/Grupo, Pesquisa)
+                processed_value = ''
                 if col_type in ['User', 'Lookup', 'UserMulti', 'LookupMulti']:
-                    if value and isinstance(value, dict):
-                        if 'results' in value:
-                            results = value.get('results', [])
-                            new_row[display_name] = '; '.join([v.get('Title', str(v)) for v in results])
-                        else:
-                            new_row[display_name] = value.get('Title', '')
-                    else:
-                        # Fallback ID
+                    processed_value = self._simplify_sharepoint_value(value)
+                    if not processed_value: # Se o enriquecimento falhou, pode haver um ID
                         val_id = item.get(f"{internal_name}Id") if internal_name else None
-                        if val_id:
-                            new_row[display_name] = f"ID: {val_id}"
-                        elif value is not None:
-                            new_row[display_name] = str(value)
-                        else:
-                            new_row[display_name] = ''
+                        if val_id: processed_value = f"ID: {val_id}"
+                elif value is not None:
+                    processed_value = self._simplify_sharepoint_value(value)
 
-                elif col_type == 'MultiChoice' and value and isinstance(value, dict):
-                    results = value.get('results', [])
-                    new_row[display_name] = '; '.join([str(v) for v in results])
+                new_row[display_name] = processed_value
 
-                else:
-                    new_row[display_name] = value if value is not None else ''
+            # ETAPA 2: Processar todas as outras colunas não utilizadas
+            extra_cols = {}
+            for raw_key, raw_value in item.items():
+                if raw_key not in used_internal_names and raw_key not in METADATA_BLOCKLIST:
+                    simplified_value = self._simplify_sharepoint_value(raw_value)
+                    extra_cols[raw_key] = simplified_value
+                    all_extra_columns.add(raw_key)
 
+            new_row.update(extra_cols)
             processed_data.append(new_row)
 
-        df = pd.DataFrame(processed_data)
-        self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
+        if all_extra_columns:
+            self.registrar_log(f"INFO: {len(all_extra_columns)} colunas extras não mapeadas foram adicionadas ao final do relatório.")
 
-        # Normaliza colunas
+        df = pd.DataFrame(processed_data)
+
+        if not df.empty:
+            # Reordenar para garantir que as colunas desejadas venham primeiro
+            final_ordered_columns = colunas_desejadas + sorted(list(all_extra_columns))
+            existing_cols = [col for col in final_ordered_columns if col in df.columns]
+            df = df[existing_cols]
+
+        self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
         df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
 
         # ----- Limpeza e Formatação -----
