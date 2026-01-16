@@ -309,6 +309,128 @@ class AutomacaoPunchList:
             self.registrar_log(f"Erro ao obter schema para '{nome_api}': {e}")
             return False
 
+    def fetch_sharepoint_data_robustly(self, session, base_url, nome_api, expand_parts, user_fields):
+        """
+        Tenta baixar dados de forma agressiva (com expands) e, se falhar com 400,
+        muda para uma estratégia de enriquecimento em duas etapas.
+        """
+        safe_nome_api = urllib.parse.quote(nome_api)
+        headers = {"Accept": "application/json;odata=verbose"}
+
+        # --- TENTATIVA 1: Consulta Agressiva ---
+        self.registrar_log("Tentando download completo com expansão de campos...")
+        query_params = ["$top=5000"]
+        select_clause = "Id,*"
+        expanded_selects = [f"{exp}/Title" for exp in expand_parts]
+        if expanded_selects:
+            select_clause += "," + ",".join(expanded_selects)
+        query_params.append(f"$select={select_clause}")
+
+        if expand_parts:
+            expand_str = ','.join(list(set(expand_parts)))
+            query_params.append(f"$expand={expand_str}")
+
+        endpoint = f"{base_url}/_api/web/lists/getbytitle('{safe_nome_api}')/items?{'&'.join(query_params)}"
+
+        response = session.get(endpoint, headers=headers)
+
+        if response.status_code == 200:
+            self.registrar_log("SUCESSO: Download completo bem-sucedido na primeira tentativa.")
+            return response.json().get('d', {}).get('results', [])
+
+        if response.status_code != 400:
+            self.registrar_log(f"ERRO: Falha no download com status inesperado: {response.status_code}")
+            return None
+
+        # --- TENTATIVA 2: Consulta Base + Enriquecimento ---
+        self.registrar_log("AVISO: Erro 400 detectado. Mudando para modo de enriquecimento robusto.")
+
+        # 1. Obter dados base (sem expands)
+        endpoint_base = f"{base_url}/_api/web/lists/getbytitle('{safe_nome_api}')/items?$select=Id,*&$top=5000"
+        self.registrar_log("Baixando dados base (sem expansão)...")
+        response_base = session.get(endpoint_base, headers=headers)
+
+        if response_base.status_code != 200:
+            self.registrar_log(f"ERRO CRÍTICO: Falha ao baixar dados base. Status: {response_base.status_code}")
+            return None
+
+        base_results = response_base.json().get('d', {}).get('results', [])
+        self.registrar_log(f"Dados base com {len(base_results)} itens baixados com sucesso.")
+
+        # 2. Coletar todos os IDs de usuário únicos que precisam ser resolvidos
+        user_ids_to_resolve = set()
+        for field_internal_name in user_fields:
+            id_field = f"{field_internal_name}Id"
+            for item in base_results:
+                user_id_data = item.get(id_field)
+                if user_id_data:
+                    # Tratar campos multi-usuário (o ID vem numa lista dentro de um dict)
+                    if isinstance(user_id_data, dict) and 'results' in user_id_data:
+                        for uid in user_id_data['results']:
+                            user_ids_to_resolve.add(uid)
+                    # Tratar campos de usuário único
+                    else:
+                        user_ids_to_resolve.add(user_id_data)
+
+        if not user_ids_to_resolve:
+            self.registrar_log("Nenhum ID de usuário para enriquecer. Retornando dados base.")
+            return base_results
+
+        self.registrar_log(f"Encontrados {len(user_ids_to_resolve)} IDs de usuário únicos para enriquecer.")
+
+        # 3. Buscar os nomes dos usuários em lotes
+        user_id_map = {}
+        user_ids_list = list(user_ids_to_resolve)
+        batch_size = 100
+
+        for i in range(0, len(user_ids_list), batch_size):
+            batch = user_ids_list[i:i + batch_size]
+            self.registrar_log(f"Buscando lote de usuários: {i + 1} a {i + len(batch)}...")
+
+            filter_query = " or ".join([f"Id eq {uid}" for uid in batch])
+            user_endpoint = f"{base_url}/_api/web/SiteUserInfoList/items?$select=Id,Title&$filter={filter_query}"
+
+            try:
+                user_response = session.get(user_endpoint, headers=headers)
+                if user_response.status_code == 200:
+                    user_data = user_response.json().get('d', {}).get('results', [])
+                    for user in user_data:
+                        user_id_map[user['Id']] = user['Title']
+                else:
+                    self.registrar_log(f"AVISO: Falha ao buscar lote de usuários. Status: {user_response.status_code}")
+            except Exception as e:
+                self.registrar_log(f"ERRO ao buscar lote de usuários: {e}")
+
+        self.registrar_log(f"{len(user_id_map)} de {len(user_ids_to_resolve)} nomes de usuário resolvidos com sucesso.")
+
+        # 4. Enriquecer os resultados base com os nomes
+        if not user_id_map:
+            self.registrar_log("AVISO: Nenhum nome de usuário pôde ser resolvido. A planilha pode conter apenas IDs.")
+            return base_results
+
+        for item in base_results:
+            for field_internal_name in user_fields:
+                id_field = f"{field_internal_name}Id"
+                user_id_data = item.get(id_field)
+
+                if not user_id_data:
+                    continue
+
+                # Trata campo multi-usuário
+                if isinstance(user_id_data, dict) and 'results' in user_id_data:
+                    enriched_users = []
+                    for uid in user_id_data['results']:
+                        if uid in user_id_map:
+                            enriched_users.append({'Title': user_id_map[uid]})
+                    # Recria a estrutura que a função tratar_dados espera
+                    item[field_internal_name] = {'results': enriched_users}
+                # Trata campo de usuário único
+                elif user_id_data in user_id_map:
+                    item[field_internal_name] = {'Title': user_id_map[user_id_data]}
+
+        self.registrar_log("Enriquecimento de dados concluído.")
+        return base_results
+
     def iniciar_sessao_navegador(self):
         if not os.path.exists(CAMINHO_DRIVER_FIXO):
             self.registrar_log(f"ERRO CRÍTICO: Driver não encontrado em {CAMINHO_DRIVER_FIXO}")
@@ -375,9 +497,10 @@ class AutomacaoPunchList:
                     self.registrar_log(f"Construindo query para '{nome_api}'...")
 
                     expand_parts = []
+                    user_fields = []  # Lista para os nomes internos dos campos de usuário
                     missing_columns = []
 
-                    # 1. Identificar colunas e montar Expands
+                    # 1. Identificar colunas complexas (User/Lookup) e de usuário
                     for nome_coluna in colunas_desejadas:
                         col_info = self.get_col_info(nome_coluna)
 
@@ -390,59 +513,19 @@ class AutomacaoPunchList:
 
                         if col_type in ['User', 'Lookup', 'UserMulti', 'LookupMulti']:
                             expand_parts.append(internal_name)
+                            if col_type in ['User', 'UserMulti']:
+                                user_fields.append(internal_name)
 
                     if missing_columns:
                         self.registrar_log(
-                            f"AVISO: {len(missing_columns)} colunas não foram encontradas no Schema (serão buscadas via 'Select *'):")
-                        for mc in missing_columns:
-                            self.registrar_log(f"   - {mc}")
+                            f"AVISO: {len(missing_columns)} colunas não encontradas no Schema: {', '.join(missing_columns)}")
 
-                    # 2. Query Estratégia "SELECT ALL"
-                    # Seleciona TUDO (*) + ID + Expansões específicas
-                    query_params = ["$top=5000"]
+                    # 2. Chamar a nova função de busca de dados robusta
+                    results = self.fetch_sharepoint_data_robustly(
+                        session, URL_BASE_SHAREPOINT, nome_api, expand_parts, user_fields
+                    )
 
-                    select_clause = "Id,*"
-                    # Adiciona os campos expandidos no select (necessário para pegar Title)
-                    expanded_selects = [f"{exp}/Title" for exp in expand_parts]
-                    if expanded_selects:
-                        select_clause += "," + ",".join(expanded_selects)
-
-                    query_params.append(f"$select={select_clause}")
-
-                    if expand_parts:
-                        expand_str = ','.join(list(set(expand_parts)))
-                        query_params.append(f"$expand={expand_str}")
-
-                    endpoint = f"{URL_BASE_SHAREPOINT}/_api/web/lists/getbytitle('{safe_nome_api}')/items?{'&'.join(query_params)}"
-                    headers = {"Accept": "application/json;odata=verbose"}
-
-                    self.registrar_log(f"Baixando dados (Modo Completo)...")
-                    response = session.get(endpoint, headers=headers)
-
-                    results = []
-                    sucesso_download = False
-
-                    if response.status_code == 200:
-                        results = response.json().get('d', {}).get('results', [])
-                        sucesso_download = True
-                    elif response.status_code == 400:
-                        self.registrar_log(
-                            "AVISO: Erro 400. Muitos campos 'Pessoa/Lookup'. Tentando modo simplificado (IDs).")
-
-                        # Fallback: Select * SEM Expands
-                        endpoint_fallback = f"{URL_BASE_SHAREPOINT}/_api/web/lists/getbytitle('{safe_nome_api}')/items?$top=5000"
-                        response_fallback = session.get(endpoint_fallback, headers=headers)
-
-                        if response_fallback.status_code == 200:
-                            results = response_fallback.json().get('d', {}).get('results', [])
-                            sucesso_download = True
-                            self.registrar_log("Dados brutos recuperados com sucesso.")
-                        else:
-                            self.registrar_log(f"ERRO: Fallback falhou. Status: {response_fallback.status_code}")
-                    else:
-                        self.registrar_log(f"ERRO: Falha ao baixar dados. Status API: {response.status_code}")
-
-                    if sucesso_download:
+                    if results is not None:  # A função retorna None em caso de falha crítica
                         if results:
                             df_final = self.tratar_dados(results, colunas_desejadas)
 
