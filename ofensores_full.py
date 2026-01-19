@@ -106,6 +106,17 @@ def processar_dados():
         hoje = datetime.now()
         log.append(f"[{hoje.strftime('%Y-%m-%d %H:%M:%S')}] Planilhas carregadas com sucesso.")
 
+        # --- NOVO: Localizador dinâmico para a coluna 'accept closing' ---
+        col_accept_closing = None
+        for col in df.columns:
+            if "Petrobras Operation accept closing" in col:
+                col_accept_closing = col
+                break
+
+        if col_accept_closing is None:
+            raise KeyError(f"A coluna 'Petrobras Operation accept closing' não foi encontrada. Colunas disponíveis: {list(df.columns)}")
+
+
         # 2. Contagem de Status Geral
         status_counts = df['Status'].value_counts().to_dict()
 
@@ -116,7 +127,7 @@ def processar_dados():
         # 4. Pending Operation Reply
         mask_op_reply = (df['Status'].str.strip() == 'Pending PB Reply') & \
                         (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
-                        (df['Petrobras Operation accept closing? (Y/N)'].isna())
+                        (df[col_accept_closing].isna())
         df_pending_op = df[mask_op_reply].copy()
         count_pending_op_reply = len(df_pending_op)
 
@@ -174,7 +185,7 @@ def processar_dados():
         # Itens para ESUP checar (Parte 2: Operação respondeu 'False')
         mask_esup_p2 = (df['Status'].str.strip() == 'Pending PB Reply') & \
                        (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
-                       (df['Petrobras Operation accept closing? (Y/N)'] == False)
+                       (df[col_accept_closing] == False)
         df_esup_p2 = df[mask_esup_p2].copy()
 
         df_esup_check = pd.concat([df_esup_p1, df_esup_p2]).drop_duplicates().reset_index(drop=True)
@@ -182,7 +193,7 @@ def processar_dados():
         # Itens para Julius checar (Operação respondeu 'True')
         mask_julius = (df['Status'].str.strip() == 'Pending PB Reply') & \
                       (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
-                      (df['Petrobras Operation accept closing? (Y/N)'] == True)
+                      (df[col_accept_closing] == True)
         df_julius_check = df[mask_julius].copy()
 
         # --- NOVO: Agrupamento e Mapeamento para Prioridade ESUP ---
