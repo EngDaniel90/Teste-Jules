@@ -9,6 +9,11 @@ import pandas as pd
 from datetime import datetime
 import re
 
+# openpyxl imports
+import openpyxl
+from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.utils import get_column_letter
+
 # Importação para comunicação com Outlook Local
 try:
     import win32com.client as win32
@@ -67,7 +72,8 @@ LISTAS_SHAREPOINT = {
             "Action by", "Status", "Action Comment", "Date Cleared by ABB", "Days Since Date Cleared by ABB",
             "KBR Response", "KBR Response Date", "KBR Response by", "KBR Remarks", "KBR Category", "KBR Discipline",
             "KBR Screenshot", "Date Cleared by KBR", "Days Since Date Cleared By KBR", "Seatrium Discipline",
-            "Seatrium Remarks", "Checked By (Seatrium)", "Seatrium Comments", "Date Cleared By Seatrium",
+            "Seatrium Remarks", "Checked By (Seatrium)", "Seatrium Comments",
+            ("DateClearBySeatrium", "Date Cleared By Seatrium"),
             "Days Since Date Cleared by Seatrium", "Petrobras Response", "Petrobras Response By",
             "Petrobras Screenshot",
             "Petrobras Response Date", "Petrobras Remarks", "Petrobras Discipline", "Petrobras Category",
@@ -85,7 +91,8 @@ LISTAS_SHAREPOINT = {
             "Date Cleared by KBR", "Days Since Date Cleared by KBR", "Petrobras Response", "Petrobras Response by",
             "Petrobras Response Date", "Petrobras Screenshot", "Remarks", "Petrobras Discipline", "Petrobras Category",
             "Date Cleared by Petrobras", "Seatrium Remarks", "Seatrium Discipline", "Checked By (Seatrium)",
-            "Seatrium Comments", "Date Cleared By Seatrium", "Days Since Date Cleared by Seatrium", "Modified By",
+            "Seatrium Comments", ("DateClearBySeatrium", "Date Cleared By Seatrium"),
+            "Days Since Date Cleared by Seatrium", "Modified By",
             "Item Type", "Path"
         ]
     }
@@ -188,75 +195,102 @@ class AutomacaoPunchList:
 
         return None
 
-    def tratar_dados(self, raw_data, colunas_desejadas):
-        self.registrar_log("Processando e estruturando dados recebidos...")
-        processed_data = []
+    def _simplify_sharepoint_value(self, value):
+        """Converte um valor potencialmente complexo do SharePoint em uma string simples."""
+        if value is None:
+            return ''
+        if isinstance(value, dict):
+            if 'results' in value and isinstance(value.get('results'), list):
+                return '; '.join([self._simplify_sharepoint_value(v) for v in value['results']])
+            return value.get('Title', str(value))
+        if isinstance(value, list):
+            return '; '.join([str(v) for v in value])
+        return value
 
-        # Itera sobre cada item (linha) retornado pela API
+    def tratar_dados(self, raw_data, colunas_desejadas):
+        self.registrar_log("Processando dados recebidos (modo inclusivo com mapeamento)...")
+        if not raw_data:
+            self.registrar_log("AVISO: Nenhum dado bruto para processar.")
+            return pd.DataFrame()
+
+        processed_data = []
+        all_extra_columns = set()
+
+        METADATA_BLOCKLIST = {
+            '__metadata', 'OData__UIVersionString', 'FirstUniqueAncestorSecurableObject',
+            'RoleAssignments', 'AttachmentFiles', 'ContentType', 'FieldValuesAsHtml',
+            'FieldValuesAsText', 'FieldValuesForEdit', 'File', 'Folder', 'ParentList',
+            'Properties', 'Versions', 'odata.editLink', 'odata.etag', 'odata.id',
+            'odata.type', 'GUID', 'ServerRedirectedEmbedUri', 'ServerRedirectedEmbedUrl'
+        }
+
+        # Extrai os nomes de exibição finais para reordenar o DataFrame mais tarde
+        final_display_names = [col[1] if isinstance(col, tuple) else col for col in colunas_desejadas]
+
         for item in raw_data:
             new_row = {}
-            # Itera sobre as colunas que o usuário deseja no resultado final
-            for display_name in colunas_desejadas:
+            used_internal_names = set()
 
-                col_info = self.get_col_info(display_name)
+            # ETAPA 1: Processar colunas desejadas (com ou sem mapeamento)
+            for col_config in colunas_desejadas:
+                if isinstance(col_config, tuple):
+                    source_name, display_name = col_config
+                else:
+                    source_name, display_name = col_config, col_config
 
-                # Se achou no schema, usa o nome interno oficial
+                col_info = self.get_col_info(source_name)
+                internal_name, col_type, value = None, 'Text', None
+
                 if col_info:
                     internal_name = col_info['internal_name']
                     col_type = col_info['type']
-                else:
-                    # Se NÃO achou no schema, tenta adivinhar o InternalName ou buscar nas chaves do item
-                    # Isso ajuda quando o schema falhou mas o dado veio via "Select *"
-                    internal_name = None
-                    col_type = 'Text'  # Assumir texto
-
-                    # Tenta achar uma chave no item que pareça com o nome desejado
-                    normalized_target = self.normalize_key(display_name)
+                    used_internal_names.add(internal_name)
+                    used_internal_names.add(f"{internal_name}Id")
+                else:  # Fallback para correspondência normalizada se não estiver no schema
+                    normalized_target = self.normalize_key(source_name)
                     for k in item.keys():
                         if self.normalize_key(k) == normalized_target:
-                            internal_name = k
+                            internal_name, col_type = k, 'Text'
+                            used_internal_names.add(internal_name)
                             break
 
-                # Tenta pegar o valor
-                value = None
-                if internal_name:
-                    value = item.get(internal_name)
+                value = item.get(internal_name) if internal_name else item.get(source_name)
 
-                # Se não temos internal_name ou valor, tentamos pelo display_name direto (raro)
-                if value is None:
-                    value = item.get(display_name)
-
-                # Tratamento robusto para campos complexos (Pessoa/Grupo, Pesquisa)
+                processed_value = ''
                 if col_type in ['User', 'Lookup', 'UserMulti', 'LookupMulti']:
-                    if value and isinstance(value, dict):
-                        if 'results' in value:
-                            results = value.get('results', [])
-                            new_row[display_name] = '; '.join([v.get('Title', str(v)) for v in results])
-                        else:
-                            new_row[display_name] = value.get('Title', '')
-                    else:
-                        # Fallback ID
+                    processed_value = self._simplify_sharepoint_value(value)
+                    if not processed_value:
                         val_id = item.get(f"{internal_name}Id") if internal_name else None
-                        if val_id:
-                            new_row[display_name] = f"ID: {val_id}"
-                        elif value is not None:
-                            new_row[display_name] = str(value)
-                        else:
-                            new_row[display_name] = ''
+                        if val_id: processed_value = f"ID: {self._simplify_sharepoint_value(val_id)}"
+                elif value is not None:
+                    processed_value = self._simplify_sharepoint_value(value)
 
-                elif col_type == 'MultiChoice' and value and isinstance(value, dict):
-                    results = value.get('results', [])
-                    new_row[display_name] = '; '.join([str(v) for v in results])
+                new_row[display_name] = processed_value
 
-                else:
-                    new_row[display_name] = value if value is not None else ''
+            # ETAPA 2: Processar todas as outras colunas não utilizadas
+            extra_cols = {}
+            for raw_key, raw_value in item.items():
+                if raw_key not in used_internal_names and raw_key not in METADATA_BLOCKLIST:
+                    simplified_value = self._simplify_sharepoint_value(raw_value)
+                    extra_cols[raw_key] = simplified_value
+                    all_extra_columns.add(raw_key)
 
+            new_row.update(extra_cols)
             processed_data.append(new_row)
 
-        df = pd.DataFrame(processed_data)
-        self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
+        if all_extra_columns:
+            self.registrar_log(
+                f"INFO: {len(all_extra_columns)} colunas extras não mapeadas foram adicionadas ao final do relatório.")
 
-        # Normaliza colunas
+        df = pd.DataFrame(processed_data)
+
+        if not df.empty:
+            # Reordenar para garantir que as colunas desejadas venham primeiro, na ordem correta
+            final_ordered_columns = final_display_names + sorted(list(all_extra_columns))
+            existing_cols = [col for col in final_ordered_columns if col in df.columns]
+            df = df[existing_cols]
+
+        self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
         df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
 
         # ----- Limpeza e Formatação -----
@@ -303,6 +337,138 @@ class AutomacaoPunchList:
         except Exception as e:
             self.registrar_log(f"Erro ao obter schema para '{nome_api}': {e}")
             return False
+
+    def fetch_sharepoint_data_robustly(self, session, base_url, nome_api, expand_parts, user_fields):
+        """
+        Tenta baixar dados de forma agressiva (com expands) e, se falhar com 400,
+        muda para uma estratégia de enriquecimento em duas etapas.
+        """
+        safe_nome_api = urllib.parse.quote(nome_api)
+        headers = {"Accept": "application/json;odata=verbose"}
+
+        # --- TENTATIVA 1: Consulta Agressiva ---
+        self.registrar_log("Tentando download completo com expansão de campos...")
+        query_params = ["$top=5000"]
+        select_clause = "Id,*"
+        expanded_selects = [f"{exp}/Title" for exp in expand_parts]
+        if expanded_selects:
+            select_clause += "," + ",".join(expanded_selects)
+        query_params.append(f"$select={select_clause}")
+
+        if expand_parts:
+            expand_str = ','.join(list(set(expand_parts)))
+            query_params.append(f"$expand={expand_str}")
+
+        endpoint = f"{base_url}/_api/web/lists/getbytitle('{safe_nome_api}')/items?{'&'.join(query_params)}"
+
+        response = session.get(endpoint, headers=headers)
+
+        if response.status_code == 200:
+            self.registrar_log("SUCESSO: Download completo bem-sucedido na primeira tentativa.")
+            return response.json().get('d', {}).get('results', [])
+
+        if response.status_code != 400:
+            self.registrar_log(f"ERRO: Falha no download com status inesperado: {response.status_code}")
+            return None
+
+        # --- TENTATIVA 2: Consulta Base + Enriquecimento ---
+        self.registrar_log("AVISO: Erro 400 detectado. Mudando para modo de enriquecimento robusto.")
+
+        # 1. Obter dados base (sem expands)
+        endpoint_base = f"{base_url}/_api/web/lists/getbytitle('{safe_nome_api}')/items?$select=Id,*&$top=5000"
+        self.registrar_log("Baixando dados base (sem expansão)...")
+        response_base = session.get(endpoint_base, headers=headers)
+
+        if response_base.status_code != 200:
+            self.registrar_log(f"ERRO CRÍTICO: Falha ao baixar dados base. Status: {response_base.status_code}")
+            return None
+
+        base_results = response_base.json().get('d', {}).get('results', [])
+        self.registrar_log(f"Dados base com {len(base_results)} itens baixados com sucesso.")
+
+        # 2. Coletar todos os IDs de usuário únicos que precisam ser resolvidos
+        user_ids_to_resolve = set()
+        for field_internal_name in user_fields:
+            id_field = f"{field_internal_name}Id"
+            for item in base_results:
+                user_id_data = item.get(id_field)
+                if user_id_data:
+                    # Tratar campos multi-usuário (o ID vem numa lista dentro de um dict)
+                    if isinstance(user_id_data, dict) and 'results' in user_id_data:
+                        for uid in user_id_data['results']:
+                            user_ids_to_resolve.add(uid)
+                    # Tratar campos de usuário único
+                    else:
+                        user_ids_to_resolve.add(user_id_data)
+
+        if not user_ids_to_resolve:
+            self.registrar_log("Nenhum ID de usuário para enriquecer. Retornando dados base.")
+            return base_results
+
+        self.registrar_log(f"Encontrados {len(user_ids_to_resolve)} IDs de usuário únicos para enriquecer.")
+
+        # 3. Buscar os nomes dos usuários em lotes
+        user_id_map = {}
+        user_ids_list = list(user_ids_to_resolve)
+        batch_size = 100
+
+        for i in range(0, len(user_ids_list), batch_size):
+            batch = user_ids_list[i:i + batch_size]
+            self.registrar_log(f"Buscando lote de usuários: {i + 1} a {i + len(batch)}...")
+
+            filter_query = " or ".join([f"Id eq {uid}" for uid in batch])
+            user_endpoint = f"{base_url}/_api/web/SiteUserInfoList/items?$select=Id,Title&$filter={filter_query}"
+
+            try:
+                user_response = session.get(user_endpoint, headers=headers)
+                if user_response.status_code == 200:
+                    user_data = user_response.json().get('d', {}).get('results', [])
+                    for user in user_data:
+                        user_id_map[user['Id']] = user['Title']
+                else:
+                    self.registrar_log(f"AVISO: Falha ao buscar lote de usuários. Status: {user_response.status_code}")
+            except Exception as e:
+                self.registrar_log(f"ERRO ao buscar lote de usuários: {e}")
+
+        self.registrar_log(f"{len(user_id_map)} de {len(user_ids_to_resolve)} nomes de usuário resolvidos com sucesso.")
+
+        # 4. Enriquecer os resultados base com os nomes
+        if not user_id_map:
+            self.registrar_log("AVISO: Nenhum nome de usuário pôde ser resolvido. A planilha pode conter apenas IDs.")
+            return base_results
+
+        for item in base_results:
+            for field_internal_name in user_fields:
+                id_field = f"{field_internal_name}Id"
+                user_id_data = item.get(id_field)
+
+                if not user_id_data:
+                    continue
+
+                # Trata campo multi-usuário
+                if isinstance(user_id_data, dict) and 'results' in user_id_data:
+                    enriched_users = []
+                    for uid in user_id_data['results']:
+                        if uid in user_id_map:
+                            enriched_users.append({'Title': user_id_map[uid]})
+                    # Recria a estrutura que a função tratar_dados espera
+                    item[field_internal_name] = {'results': enriched_users}
+                # Trata campo de usuário único
+                elif user_id_data in user_id_map:
+                    item[field_internal_name] = {'Title': user_id_map[user_id_data]}
+
+        self.registrar_log("Enriquecimento de dados concluído.")
+        return base_results
+
+    def _sanitize_header(self, header_text):
+        """Remove caracteres inválidos para cabeçalhos de tabela do Excel e garante unicidade."""
+        if not isinstance(header_text, str):
+            header_text = str(header_text)
+        # Remove caracteres inválidos para nomes de tabelas/cabeçalhos do Excel
+        invalid_chars = r'[\[\]/\\*?:\']'
+        sanitized = re.sub(invalid_chars, '', header_text)
+        # Trunca para o limite de 255 caracteres do Excel
+        return sanitized[:255]
 
     def iniciar_sessao_navegador(self):
         if not os.path.exists(CAMINHO_DRIVER_FIXO):
@@ -370,11 +536,14 @@ class AutomacaoPunchList:
                     self.registrar_log(f"Construindo query para '{nome_api}'...")
 
                     expand_parts = []
+                    user_fields = []  # Lista para os nomes internos dos campos de usuário
                     missing_columns = []
 
-                    # 1. Identificar colunas e montar Expands
-                    for nome_coluna in colunas_desejadas:
-                        col_info = self.get_col_info(nome_coluna)
+                    # 1. Identificar colunas complexas (User/Lookup) e de usuário
+                    for col_config in colunas_desejadas:
+                        # Se for uma tupla de mapeamento (source, display), use a origem
+                        source_name = col_config[0] if isinstance(col_config, tuple) else col_config
+                        col_info = self.get_col_info(source_name)
 
                         if not col_info:
                             missing_columns.append(nome_coluna)
@@ -385,59 +554,19 @@ class AutomacaoPunchList:
 
                         if col_type in ['User', 'Lookup', 'UserMulti', 'LookupMulti']:
                             expand_parts.append(internal_name)
+                            if col_type in ['User', 'UserMulti']:
+                                user_fields.append(internal_name)
 
                     if missing_columns:
                         self.registrar_log(
-                            f"AVISO: {len(missing_columns)} colunas não foram encontradas no Schema (serão buscadas via 'Select *'):")
-                        for mc in missing_columns:
-                            self.registrar_log(f"   - {mc}")
+                            f"AVISO: {len(missing_columns)} colunas não encontradas no Schema: {', '.join(missing_columns)}")
 
-                    # 2. Query Estratégia "SELECT ALL"
-                    # Seleciona TUDO (*) + ID + Expansões específicas
-                    query_params = ["$top=5000"]
+                    # 2. Chamar a nova função de busca de dados robusta
+                    results = self.fetch_sharepoint_data_robustly(
+                        session, URL_BASE_SHAREPOINT, nome_api, expand_parts, user_fields
+                    )
 
-                    select_clause = "Id,*"
-                    # Adiciona os campos expandidos no select (necessário para pegar Title)
-                    expanded_selects = [f"{exp}/Title" for exp in expand_parts]
-                    if expanded_selects:
-                        select_clause += "," + ",".join(expanded_selects)
-
-                    query_params.append(f"$select={select_clause}")
-
-                    if expand_parts:
-                        expand_str = ','.join(list(set(expand_parts)))
-                        query_params.append(f"$expand={expand_str}")
-
-                    endpoint = f"{URL_BASE_SHAREPOINT}/_api/web/lists/getbytitle('{safe_nome_api}')/items?{'&'.join(query_params)}"
-                    headers = {"Accept": "application/json;odata=verbose"}
-
-                    self.registrar_log(f"Baixando dados (Modo Completo)...")
-                    response = session.get(endpoint, headers=headers)
-
-                    results = []
-                    sucesso_download = False
-
-                    if response.status_code == 200:
-                        results = response.json().get('d', {}).get('results', [])
-                        sucesso_download = True
-                    elif response.status_code == 400:
-                        self.registrar_log(
-                            "AVISO: Erro 400. Muitos campos 'Pessoa/Lookup'. Tentando modo simplificado (IDs).")
-
-                        # Fallback: Select * SEM Expands
-                        endpoint_fallback = f"{URL_BASE_SHAREPOINT}/_api/web/lists/getbytitle('{safe_nome_api}')/items?$top=5000"
-                        response_fallback = session.get(endpoint_fallback, headers=headers)
-
-                        if response_fallback.status_code == 200:
-                            results = response_fallback.json().get('d', {}).get('results', [])
-                            sucesso_download = True
-                            self.registrar_log("Dados brutos recuperados com sucesso.")
-                        else:
-                            self.registrar_log(f"ERRO: Fallback falhou. Status: {response_fallback.status_code}")
-                    else:
-                        self.registrar_log(f"ERRO: Falha ao baixar dados. Status API: {response.status_code}")
-
-                    if sucesso_download:
+                    if results is not None:  # A função retorna None em caso de falha crítica
                         if results:
                             df_final = self.tratar_dados(results, colunas_desejadas)
 
@@ -471,11 +600,91 @@ class AutomacaoPunchList:
                 finally:
                     self.registrar_log(f"--- Fim lista: {nome_lista} ---\n")
 
+            # Após o download de todas as listas, inicia a formatação
+            self.formatar_arquivos_como_tabela()
+
         except Exception as e_ciclo:
             self.registrar_log(f"Falha crítica no ciclo: {e_ciclo}")
             ciclo_sucesso = False
         finally:
             self.enviar_via_outlook_app(ciclo_sucesso)
+
+    def formatar_arquivos_como_tabela(self):
+        """
+        Percorre pastas, limpa cabeçalhos e formata os dados como Tabela 'Tabela_query'.
+        """
+        self.registrar_log("--- Iniciando formatação de tabelas (com limpeza de cabeçalho) ---")
+        estilo = TableStyleInfo(name="TableStyleMedium9", showFirstColumn=False, showLastColumn=False,
+                                showRowStripes=True, showColumnStripes=False)
+
+        for pasta in PASTAS_DESTINO:
+            if not os.path.exists(pasta):
+                self.registrar_log(f"AVISO: Pasta de formatação '{pasta}' não encontrada. Pulando...")
+                continue
+            self.registrar_log(f"Verificando arquivos para formatação em: {pasta}")
+
+            for config_lista in LISTAS_SHAREPOINT.values():
+                arquivo_nome = config_lista["arquivo_saida"]
+                caminho_completo = os.path.join(pasta, arquivo_nome)
+                if not os.path.exists(caminho_completo):
+                    self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' não encontrado em '{pasta}'.")
+                    continue
+
+                try:
+                    wb = openpyxl.load_workbook(caminho_completo)
+                    sheet = wb.active
+                    if sheet.max_row < 1:
+                        self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' está vazio ou sem cabeçalhos.")
+                        continue
+
+                    if "Tabela_query" in sheet.tables:
+                        self.registrar_log(f"INFO: Arquivo '{arquivo_nome}' já possui 'Tabela_query' formatada.")
+                        continue
+
+                    # --- Lógica de Limpeza e Desduplicação de Cabeçalho ---
+                    headers = [cell.value for cell in sheet[1]]
+                    novos_headers = []
+                    seen_headers = set()
+
+                    for header in headers:
+                        sanitized = self._sanitize_header(header)
+
+                        # Garante unicidade
+                        final_header = sanitized
+                        counter = 2
+                        while final_header in seen_headers:
+                            final_header = f"{sanitized}_{counter}"
+                            counter += 1
+
+                        novos_headers.append(final_header)
+                        seen_headers.add(final_header)
+
+                    # Escreve os cabeçalhos limpos de volta na planilha
+                    for col_idx, new_header_text in enumerate(novos_headers, 1):
+                        sheet.cell(row=1, column=col_idx, value=new_header_text)
+
+                    # Se houver tabelas existentes com outros nomes, removemos para evitar conflitos
+                    if sheet.tables:
+                        for table_name in list(sheet.tables.keys()):
+                            self.registrar_log(
+                                f"INFO: Removendo tabela antiga '{table_name}' para recriar com cabeçalhos limpos.")
+                            del sheet.tables[table_name]
+
+                    # Cria a nova tabela com os cabeçalhos já limpos
+                    if sheet.max_row > 0:
+                        referencia = f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
+                        tab = Table(displayName="Tabela_query", ref=referencia)
+                        tab.tableStyleInfo = estilo
+                        sheet.add_table(tab)
+                        self.registrar_log(f"SUCESSO: Cabeçalhos limpos e 'Tabela_query' criada em '{arquivo_nome}'.")
+                    else:
+                        self.registrar_log(f"AVISO: Sem dados para criar a tabela em '{arquivo_nome}'.")
+
+                    wb.save(caminho_completo)
+
+                except Exception as e:
+                    self.registrar_log(f"ERRO CRÍTICO ao formatar '{arquivo_nome}': {e}")
+        self.registrar_log("--- Formatação de tabelas concluída ---")
 
     def executar(self):
         self.iniciar_sessao_navegador()
