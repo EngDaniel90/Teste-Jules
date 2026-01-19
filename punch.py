@@ -73,7 +73,7 @@ LISTAS_SHAREPOINT = {
             "KBR Response", "KBR Response Date", "KBR Response by", "KBR Remarks", "KBR Category", "KBR Discipline",
             "KBR Screenshot", "Date Cleared by KBR", "Days Since Date Cleared By KBR", "Seatrium Discipline",
             "Seatrium Remarks", "Checked By (Seatrium)", "Seatrium Comments",
-            ("DateClearBySeatrium", "Date Cleared By Seatrium"),
+            "Date Cleared By Seatrium",
             "Days Since Date Cleared by Seatrium", "Petrobras Response", "Petrobras Response By",
             "Petrobras Screenshot",
             "Petrobras Response Date", "Petrobras Remarks", "Petrobras Discipline", "Petrobras Category",
@@ -91,7 +91,7 @@ LISTAS_SHAREPOINT = {
             "Date Cleared by KBR", "Days Since Date Cleared by KBR", "Petrobras Response", "Petrobras Response by",
             "Petrobras Response Date", "Petrobras Screenshot", "Remarks", "Petrobras Discipline", "Petrobras Category",
             "Date Cleared by Petrobras", "Seatrium Remarks", "Seatrium Discipline", "Checked By (Seatrium)",
-            "Seatrium Comments", ("DateClearBySeatrium", "Date Cleared By Seatrium"),
+            "Seatrium Comments", "Date Cleared By Seatrium",
             "Days Since Date Cleared by Seatrium", "Modified By",
             "Item Type", "Path"
         ]
@@ -546,7 +546,7 @@ class AutomacaoPunchList:
                         col_info = self.get_col_info(source_name)
 
                         if not col_info:
-                            missing_columns.append(nome_coluna)
+                            missing_columns.append(source_name)
                             continue
 
                         internal_name = col_info['internal_name']
