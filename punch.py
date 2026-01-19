@@ -285,13 +285,30 @@ class AutomacaoPunchList:
         df = pd.DataFrame(processed_data)
 
         if not df.empty:
-            # Reordenar para garantir que as colunas desejadas venham primeiro, na ordem correta
-            final_ordered_columns = final_display_names + sorted(list(all_extra_columns))
-            existing_cols = [col for col in final_ordered_columns if col in df.columns]
-            df = df[existing_cols]
+            # Reordenar para garantir que as colunas desejadas venham primeiro, na ordem correta, sem duplicatas
+            seen_ordered = set()
+            unique_ordered_cols = []
+            for col_name in (final_display_names + sorted(list(all_extra_columns))):
+                if col_name in df.columns and col_name not in seen_ordered:
+                    unique_ordered_cols.append(col_name)
+                    seen_ordered.add(col_name)
+            df = df[unique_ordered_cols]
 
         self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
         df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
+
+        # Trata duplicatas de nomes que podem surgir após o strip/replace
+        if df.columns.duplicated().any():
+            new_cols = []
+            seen_cols = {}
+            for c in df.columns:
+                if c not in seen_cols:
+                    new_cols.append(c)
+                    seen_cols[c] = 1
+                else:
+                    seen_cols[c] += 1
+                    new_cols.append(f"{c}_{seen_cols[c]}")
+            df.columns = new_cols
 
         # ----- Limpeza e Formatação -----
         self.registrar_log("Limpando e formatando o DataFrame final...")
