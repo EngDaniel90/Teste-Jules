@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import os
 import matplotlib.dates as mdates
+import numpy as np
 
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
 PATH_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx"
@@ -485,12 +486,25 @@ def gerar_grafico_fechamento_operacao(df):
     """
     log = []
     try:
+        # --- NOVO: Localizador dinâmico para a coluna 'Date Cleared' ---
+        col_date_cleared = None
+        for col in df.columns:
+            if "Date Cleared by Petrobras Operation" in col:
+                col_date_cleared = col
+                break
+
+        if col_date_cleared is None:
+            # Se a coluna não existir, não é um erro crítico, apenas não gera o gráfico.
+            log.append("Coluna 'Date Cleared by Petrobras Operation' não encontrada. Gráfico de fechamento não gerado.")
+            return True, log
+
         # 1. Limpeza e conversão de dados
-        df_cleaned = df.dropna(subset=['Date Cleared by Petrobras Operation']).copy()
+        # Substitui 0 por NaN para evitar a conversão para 1970, depois remove os nulos.
+        df_cleaned = df.replace({col_date_cleared: 0}, np.nan).dropna(subset=[col_date_cleared]).copy()
 
         # Converte para datetime, tratando erros e o formato dd/mm/yyyy
         df_cleaned['Date Cleared'] = pd.to_datetime(
-            df_cleaned['Date Cleared by Petrobras Operation'],
+            df_cleaned[col_date_cleared],
             dayfirst=True,
             errors='coerce'
         )
