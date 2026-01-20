@@ -19,6 +19,7 @@ PATH_EHOUSE_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_
 PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
 PATH_VENDORS_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_Vendors.xlsx"
 PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
+PATH_PENDENCIAS_OP_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\pendencias_operacao.png"
 PATH_FECHAMENTO_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\fechamento_operacao.png"
 EMAIL_DESTINO = "279a5359.petrobras.com.br@br.teams.ms"
 EMAIL_LOG = "658b4ef7.petrobras.com.br@br.teams.ms"
@@ -575,6 +576,51 @@ def gerar_grafico_fechamento_operacao(df):
         return False, log
 
 
+def gerar_grafico_pendencias_operacao(df_op_check):
+    """
+    Gera um gráfico de barras horizontais com as pendências da operação por disciplina.
+    """
+    log = []
+    try:
+        if df_op_check is None or df_op_check.empty:
+            log.append("Nenhum item pendente da operação para gerar gráfico.")
+            return True, log
+
+        plt.figure(figsize=(12, 8))
+
+        # Agrupa por disciplina e conta os itens
+        pendencias_por_disciplina = df_op_check['Petrobras Discipline'].value_counts().sort_values(ascending=True)
+
+        ax = sns.barplot(
+            x=pendencias_por_disciplina.values,
+            y=pendencias_por_disciplina.index,
+            palette='Reds_r',
+            hue=pendencias_por_disciplina.index,
+            legend=False
+        )
+
+        ax.set_title('Pendências da Operação por Disciplina', fontsize=18, fontweight='bold', color='#c00000')
+        ax.set_xlabel('Quantidade de Itens Pendentes', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Disciplina', fontsize=12, fontweight='bold')
+
+        # Adiciona os rótulos de dados (contagem) no final das barras
+        for i, v in enumerate(pendencias_por_disciplina.values):
+            ax.text(v + 0.1, i, str(v), color='black', va='center', fontweight='bold')
+
+        plt.tight_layout()
+        plt.savefig(PATH_PENDENCIAS_OP_GRAPH, dpi=200, bbox_inches='tight')
+        plt.close()
+
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico de pendências da operação gerado com sucesso.")
+        return True, log
+
+    except Exception as e:
+        erro_detalhado = traceback.format_exc()
+        print(f"ERRO CRÍTICO ao gerar gráfico de pendências da operação: {str(e)}\n{erro_detalhado}")
+        log.append(f"ERRO CRÍTICO ao gerar gráfico de pendências da operação: {str(e)}\n{erro_detalhado}")
+        return False, log
+
+
 def enviar_email_vendors(dados):
     """
     Envia um e-mail de status específico para a punch list de Vendors.
@@ -756,6 +802,8 @@ def enviar_email(dados, log_processo):
             mail.Attachments.Add(PATH_DASHBOARD_IMG)
         if os.path.exists(PATH_FECHAMENTO_GRAPH):
             mail.Attachments.Add(PATH_FECHAMENTO_GRAPH)
+        if os.path.exists(PATH_PENDENCIAS_OP_GRAPH):
+            mail.Attachments.Add(PATH_PENDENCIAS_OP_GRAPH)
 
         mail.Send()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO}.")
@@ -860,6 +908,13 @@ if __name__ == "__main__":
 
         sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
         log_total_topside += log_dashboard
+
+        # Geração do novo gráfico de pendências da operação
+        sucesso_pendencias_op, log_pendencias_op = gerar_grafico_pendencias_operacao(dados_topside['df_op_check'])
+        log_total_topside += log_pendencias_op
+        if not sucesso_pendencias_op:
+            print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO DE PENDÊNCIAS DA OPERAÇÃO !!!")
+
         if sucesso_dashboard:
             print("-> Dashboard Topside gerado com sucesso.")
         else:
