@@ -487,7 +487,7 @@ def gerar_grafico_fechamento_operacao(df):
     """
     log = []
     try:
-        # --- NOVO: Localizador dinâmico para a coluna 'Date Cleared' ---
+        # 1. Localização dinâmica da coluna
         col_date_cleared = None
         for col in df.columns:
             if "Date Cleared by Petrobras Operation" in col:
@@ -495,43 +495,29 @@ def gerar_grafico_fechamento_operacao(df):
                 break
 
         if col_date_cleared is None:
-            # Se a coluna não existir, não é um erro crítico, apenas não gera o gráfico.
             log.append("Coluna 'Date Cleared by Petrobras Operation' não encontrada. Gráfico de fechamento não gerado.")
             return True, log
 
-        # 1. Limpeza e conversão de dados
-        # Substitui 0 por NaN para evitar a conversão para 1970, depois remove os nulos.
-        df_cleaned = df.replace({col_date_cleared: 0}, np.nan).dropna(subset=[col_date_cleared]).copy()
+        # 2. Limpeza e Conversão Rigorosa de Dados
+        # Força a conversão para data, transformando qualquer erro (texto, 0, etc.) em NaT (Not a Time)
+        datas_convertidas = pd.to_datetime(df[col_date_cleared], dayfirst=True, errors='coerce')
 
-        # Converte para datetime, tratando erros e o formato dd/mm/yyyy
-        df_cleaned['Date Cleared'] = pd.to_datetime(
-            df_cleaned[col_date_cleared],
-            dayfirst=True,
-            errors='coerce'
-        )
+        # Remove todas as entradas que não são datas válidas (NaT)
+        datas_validas = datas_convertidas.dropna()
 
-        # Remove quaisquer linhas que não puderam ser convertidas
-        df_cleaned.dropna(subset=['Date Cleared'], inplace=True)
-
-        # 2. Lida com o caso de não haver dados válidos
-        if df_cleaned.empty:
-            log.append("Nenhum dado válido de fechamento pela operação encontrado para gerar o gráfico.")
-            # É importante retornar True para não ser tratado como uma falha crítica
+        # 3. Lida com o caso de não haver dados válidos
+        if datas_validas.empty:
+            log.append("Nenhuma data válida de fechamento pela operação encontrada para gerar o gráfico.")
             return True, log
 
-        # 3. Preparação do intervalo de datas e contagem
-        # Extrai apenas a data para a contagem
-        df_cleaned['Date Cleared'] = df_cleaned['Date Cleared'].dt.date
-        fechamentos_por_dia = df_cleaned['Date Cleared'].value_counts()
+        # 4. Preparação do intervalo de datas e contagem
+        fechamentos_por_dia = datas_validas.dt.date.value_counts()
 
-        # Determina o intervalo completo do gráfico: do primeiro fechamento até hoje
         start_date = fechamentos_por_dia.index.min()
         end_date = datetime.now().date()
 
-        # Cria um índice com todos os dias no intervalo
         full_date_range = pd.date_range(start=start_date, end=end_date, freq='D').date
 
-        # Reindexa a contagem para incluir todos os dias, preenchendo dias sem fechamento com 0
         fechamentos_por_dia = fechamentos_por_dia.reindex(full_date_range, fill_value=0).sort_index()
 
         # 4. Geração do Gráfico
@@ -589,7 +575,7 @@ def gerar_grafico_pendencias_operacao(df_op_check):
         plt.figure(figsize=(12, 8))
 
         # Agrupa por disciplina e conta os itens
-        pendencias_por_disciplina = df_op_check['Petrobras Discipline'].value_counts().sort_values(ascending=True)
+        pendencias_por_disciplina = df_op_check['Petrobras Discipline'].value_counts().sort_values(ascending=False)
 
         ax = sns.barplot(
             x=pendencias_por_disciplina.values,
