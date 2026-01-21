@@ -499,10 +499,7 @@ def gerar_grafico_fechamento_operacao(df):
             return True, log
 
         # 2. Limpeza e Conversão Rigorosa de Dados
-        # Força a conversão para data, transformando qualquer erro (texto, 0, etc.) em NaT (Not a Time)
         datas_convertidas = pd.to_datetime(df[col_date_cleared], dayfirst=True, errors='coerce')
-
-        # Remove todas as entradas que não são datas válidas (NaT)
         datas_validas = datas_convertidas.dropna()
 
         # 3. Lida com o caso de não haver dados válidos
@@ -520,7 +517,7 @@ def gerar_grafico_fechamento_operacao(df):
 
         fechamentos_por_dia = fechamentos_por_dia.reindex(full_date_range, fill_value=0).sort_index()
 
-        # 4. Geração do Gráfico
+        # 5. Geração do Gráfico
         plt.figure(figsize=(15, 8))
         ax = sns.barplot(x=fechamentos_por_dia.index, y=fechamentos_por_dia.values, palette='dark:#005a9e', hue=fechamentos_por_dia.index, legend=False)
 
@@ -528,19 +525,14 @@ def gerar_grafico_fechamento_operacao(df):
         ax.set_xlabel('Data', fontsize=12, fontweight='bold')
         ax.set_ylabel('Quantidade de Itens Fechados', fontsize=12, fontweight='bold')
 
-        # 5. Formatação correta do eixo de data
-        # Define o formato da data para dia/mês/ano
         date_format = mdates.DateFormatter('%d/%m/%Y')
         ax.xaxis.set_major_formatter(date_format)
 
-        # Melhora a legibilidade rotacionando as datas
         plt.xticks(rotation=45, ha='right')
 
-        # Ajusta automaticamente o espaçamento para evitar sobreposição
         fig = plt.gcf()
         fig.autofmt_xdate()
 
-        # Adiciona os rótulos de dados (contagem) acima das barras
         for p in ax.patches:
             if p.get_height() > 0:
                 ax.annotate(f'{int(p.get_height())}',
@@ -786,10 +778,10 @@ def enviar_email(dados, log_processo):
 
         if os.path.exists(PATH_DASHBOARD_IMG):
             mail.Attachments.Add(PATH_DASHBOARD_IMG)
-        if os.path.exists(PATH_FECHAMENTO_GRAPH):
-            mail.Attachments.Add(PATH_FECHAMENTO_GRAPH)
         if os.path.exists(PATH_PENDENCIAS_OP_GRAPH):
             mail.Attachments.Add(PATH_PENDENCIAS_OP_GRAPH)
+        if os.path.exists(PATH_FECHAMENTO_GRAPH):
+            mail.Attachments.Add(PATH_FECHAMENTO_GRAPH)
 
         mail.Send()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO}.")
@@ -884,13 +876,7 @@ if __name__ == "__main__":
     dados_topside, log_topside, sucesso_topside = processar_dados()
     if sucesso_topside:
         print("-> Dados Topside processados com sucesso.")
-
-        # Geração do novo gráfico de fechamento
-        sucesso_fechamento, log_fechamento = gerar_grafico_fechamento_operacao(dados_topside['df_full'])
-        log_total_topside = log_topside + log_fechamento
-        if not sucesso_fechamento:
-            print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO DE FECHAMENTO !!!")
-            # A falha aqui não impede o envio do e-mail principal, mas o erro será logado.
+        log_total_topside = log_topside
 
         sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
         log_total_topside += log_dashboard
@@ -900,6 +886,12 @@ if __name__ == "__main__":
         log_total_topside += log_pendencias_op
         if not sucesso_pendencias_op:
             print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO DE PENDÊNCIAS DA OPERAÇÃO !!!")
+
+        # Geração do gráfico de fechamento pela operação
+        sucesso_fechamento_op, log_fechamento_op = gerar_grafico_fechamento_operacao(dados_topside['df_full'])
+        log_total_topside += log_fechamento_op
+        if not sucesso_fechamento_op:
+            print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO DE FECHAMENTO PELA OPERAÇÃO !!!")
 
         if sucesso_dashboard:
             print("-> Dashboard Topside gerado com sucesso.")
