@@ -20,7 +20,6 @@ PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_stat
 PATH_VENDORS_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_Vendors.xlsx"
 PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
 PATH_PENDENCIAS_OP_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\pendencias_operacao.png"
-PATH_FECHAMENTO_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\fechamento_operacao.png"
 EMAIL_DESTINO = "279a5359.petrobras.com.br@br.teams.ms"
 EMAIL_LOG = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
@@ -480,80 +479,6 @@ def gerar_dashboard_vendors(dados):
         return False, log
 
 
-def gerar_grafico_fechamento_operacao(df):
-    """
-    Gera um gráfico de barras mostrando a quantidade de itens que a operação fechou por dia,
-    cobrindo o período desde a primeira data de fechamento até o dia atual.
-    """
-    log = []
-    try:
-        # 1. Localização dinâmica da coluna
-        col_date_cleared = None
-        for col in df.columns:
-            if "Date Cleared by Petrobras Operation" in col:
-                col_date_cleared = col
-                break
-
-        if col_date_cleared is None:
-            log.append("Coluna 'Date Cleared by Petrobras Operation' não encontrada. Gráfico de fechamento não gerado.")
-            return True, log
-
-        # 2. Limpeza e Conversão Rigorosa de Dados
-        datas_convertidas = pd.to_datetime(df[col_date_cleared], dayfirst=True, errors='coerce')
-        datas_validas = datas_convertidas.dropna()
-
-        # 3. Lida com o caso de não haver dados válidos
-        if datas_validas.empty:
-            log.append("Nenhuma data válida de fechamento pela operação encontrada para gerar o gráfico.")
-            return True, log
-
-        # 4. Preparação do intervalo de datas e contagem
-        fechamentos_por_dia = datas_validas.dt.date.value_counts()
-
-        start_date = fechamentos_por_dia.index.min()
-        end_date = datetime.now().date()
-
-        full_date_range = pd.date_range(start=start_date, end=end_date, freq='D').date
-
-        fechamentos_por_dia = fechamentos_por_dia.reindex(full_date_range, fill_value=0).sort_index()
-
-        # 5. Geração do Gráfico
-        plt.figure(figsize=(15, 8))
-        ax = sns.barplot(x=fechamentos_por_dia.index, y=fechamentos_por_dia.values, palette='dark:#005a9e', hue=fechamentos_por_dia.index, legend=False)
-
-        ax.set_title('Desempenho de Fechamento de Itens pela Operação', fontsize=18, fontweight='bold')
-        ax.set_xlabel('Data', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Quantidade de Itens Fechados', fontsize=12, fontweight='bold')
-
-        date_format = mdates.DateFormatter('%d/%m/%Y')
-        ax.xaxis.set_major_formatter(date_format)
-
-        plt.xticks(rotation=45, ha='right')
-
-        fig = plt.gcf()
-        fig.autofmt_xdate()
-
-        for p in ax.patches:
-            if p.get_height() > 0:
-                ax.annotate(f'{int(p.get_height())}',
-                            (p.get_x() + p.get_width() / 2., p.get_height()),
-                            ha='center', va='center', fontsize=11, color='black', xytext=(0, 5),
-                            textcoords='offset points')
-
-        plt.tight_layout()
-        plt.savefig(PATH_FECHAMENTO_GRAPH, dpi=200, bbox_inches='tight')
-        plt.close()
-
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico de fechamento pela operação gerado com sucesso.")
-        return True, log
-
-    except Exception as e:
-        erro_detalhado = traceback.format_exc()
-        print(f"ERRO CRÍTICO ao gerar gráfico de fechamento: {str(e)}\n{erro_detalhado}")
-        log.append(f"ERRO CRÍTICO ao gerar gráfico de fechamento: {str(e)}\n{erro_detalhado}")
-        return False, log
-
-
 def gerar_grafico_pendencias_operacao(df_op_check):
     """
     Gera um gráfico de barras horizontais com as pendências da operação por disciplina.
@@ -780,8 +705,6 @@ def enviar_email(dados, log_processo):
             mail.Attachments.Add(PATH_DASHBOARD_IMG)
         if os.path.exists(PATH_PENDENCIAS_OP_GRAPH):
             mail.Attachments.Add(PATH_PENDENCIAS_OP_GRAPH)
-        if os.path.exists(PATH_FECHAMENTO_GRAPH):
-            mail.Attachments.Add(PATH_FECHAMENTO_GRAPH)
 
         mail.Send()
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO}.")
@@ -886,12 +809,6 @@ if __name__ == "__main__":
         log_total_topside += log_pendencias_op
         if not sucesso_pendencias_op:
             print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO DE PENDÊNCIAS DA OPERAÇÃO !!!")
-
-        # Geração do gráfico de fechamento pela operação
-        sucesso_fechamento_op, log_fechamento_op = gerar_grafico_fechamento_operacao(dados_topside['df_full'])
-        log_total_topside += log_fechamento_op
-        if not sucesso_fechamento_op:
-            print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO DE FECHAMENTO PELA OPERAÇÃO !!!")
 
         if sucesso_dashboard:
             print("-> Dashboard Topside gerado com sucesso.")
