@@ -66,19 +66,30 @@ def generate_manual():
         "Para cada item, você designa um responsável e define até 3 datas de acompanhamento.", normal_style))
     elements.append(Spacer(1, 24))
 
-    # --- 4. Backup e Restauração ---
-    elements.append(Paragraph("4. Backup e Restauração", header_style))
+    # --- 4. Personalização Visual ---
+    elements.append(Paragraph("4. Personalização Visual", header_style))
     elements.append(Paragraph(
-        "Para garantir a segurança dos seus dados, o sistema oferece uma funcionalidade de Backup no menu 'Gestão'.", normal_style))
+        "No menu 'Estilos & Backup', você pode deixar o AtaMaster Pro com a sua cara.", normal_style))
     elements.append(Spacer(1, 12))
     elements.append(Paragraph(
-        "- **Exportar Backup:** Cria uma cópia de segurança de todo o banco de dados em um local de sua escolha.", normal_style))
+        "- **Modos de Visualização:** Alterne entre o Modo Escuro (Dark) para maior conforto visual ou o Modo Claro (Light).", normal_style))
     elements.append(Paragraph(
-        "- **Importar Backup:** Permite restaurar os dados a partir de um arquivo de backup previamente salvo.", normal_style))
+        "- **Cores do Sistema:** Escolha entre 3 cores básicas (Azul, Verde, Laranja) para mudar o tom principal do aplicativo.", normal_style))
     elements.append(Spacer(1, 24))
 
-    # --- 5. Exportação PDF ---
-    elements.append(Paragraph("5. Exportação PDF", header_style))
+    # --- 5. Backup e Restauração ---
+    elements.append(Paragraph("5. Backup e Restauração", header_style))
+    elements.append(Paragraph(
+        "Para garantir a segurança dos seus dados, o sistema oferece uma funcionalidade de Backup no mesmo menu de Estilos.", normal_style))
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph(
+        "- **Exportar Backup:** Cria uma cópia de segurança de todo o banco de dados (.db) em um local de sua escolha.", normal_style))
+    elements.append(Paragraph(
+        "- **Importar Backup:** Permite restaurar todos os seus grupos e atas a partir de um arquivo de backup.", normal_style))
+    elements.append(Spacer(1, 24))
+
+    # --- 6. Exportação PDF ---
+    elements.append(Paragraph("6. Exportação PDF", header_style))
     elements.append(Paragraph(
         "Ao finalizar uma reunião ou consultar o histórico em 'Minhas Atas', você pode gerar um arquivo PDF profissional. "
         "O PDF contém o cabeçalho com os detalhes da reunião, uma tabela organizada com todas as tarefas e campos de "
