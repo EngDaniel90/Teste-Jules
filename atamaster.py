@@ -270,10 +270,6 @@ class ManagementView(ft.Column):
         elif self.selected_tab == "participants": content = self.participant_tab()
         else: content = self.backup_tab()
 
-        def tab_changed(e):
-            self.selected_tab = e.data if hasattr(e, "data") else e.control.value
-            self.refresh()
-
         self.controls = [
             ft.Text("Gestão de Grupos & Pessoas", size=28, weight="bold"),
             ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
@@ -449,7 +445,7 @@ class MeetingDetailView(ft.Column):
                     ft.Text(t.status.value, size=10, weight="bold", color=ft.Colors.GREEN_400 if t.status == StatusEnum.CLOSED else ft.Colors.BLUE_400)
                 ]), padding=5, bgcolor=ft.Colors.SURFACE_CONTAINER if t.status == StatusEnum.OPEN else None))
 
-def main(page: ft.Page):
+async def main(page: ft.Page):
     page.title = "AtaMaster Pro"; page.theme_mode = ft.ThemeMode.DARK; page.padding = 0; page.window_min_width = 1100; page.window_min_height = 750
     init_db()
 
@@ -460,30 +456,7 @@ def main(page: ft.Page):
         snack.open = True
         page.update()
 
-    # File Pickers
-    def on_backup_export_result(e):
-        if e.path:
-            try:
-                shutil.copy("atamaster.db", e.path)
-                show_snack(f"Backup exportado para {e.path}")
-            except Exception as ex:
-                show_snack(f"Erro ao exportar: {ex}")
-
-    def on_backup_import_result(e):
-        if e.files:
-            try:
-                shutil.copy(e.files[0].path, "atamaster.db")
-                show_snack("Backup importado com sucesso! Reinicie o aplicativo.")
-            except Exception as ex:
-                show_snack(f"Erro ao importar: {ex}")
-
-    def on_excel_result(e):
-        if e.files:
-            path = e.files[0].path
-            page.last_excel_path = path
-            import_excel(path)
-
-    def import_excel(path):
+    async def import_excel(path):
         if not openpyxl:
             show_snack("Erro: Biblioteca 'openpyxl' não instalada."); return
         try:
@@ -499,21 +472,43 @@ def main(page: ft.Page):
             show_snack(f"Importados {count} participantes de {path}")
             # Refresh management view if active
             if page.route == "/management":
-                route_change(None)
+                await route_change(None)
         except Exception as ex:
             show_snack(f"Erro ao ler Excel: {ex}")
 
     page.last_excel_path = None
-    page.backup_export_picker = ft.FilePicker(on_result=on_backup_export_result)
-    page.backup_import_picker = ft.FilePicker(on_result=on_backup_import_result)
-    page.excel_picker = ft.FilePicker(on_result=on_excel_result)
+    page.backup_export_picker = ft.FilePicker()
+    page.backup_import_picker = ft.FilePicker()
+    page.excel_picker = ft.FilePicker()
     page.overlay.extend([page.backup_export_picker, page.backup_import_picker, page.excel_picker])
 
-    def on_backup_click(_): page.backup_export_picker.save_file(file_name="atamaster_backup.db")
-    def on_restore_click(_): page.backup_import_picker.pick_files(allowed_extensions=["db"])
-    def on_excel_click(_): page.excel_picker.pick_files(allowed_extensions=["xlsx", "xls"])
-    def on_excel_refresh(_):
-        if page.last_excel_path: import_excel(page.last_excel_path)
+    async def on_backup_click(_):
+        path = await page.backup_export_picker.save_file(file_name="atamaster_backup.db")
+        if path:
+            try:
+                shutil.copy("atamaster.db", path)
+                show_snack(f"Backup exportado para {path}")
+            except Exception as ex:
+                show_snack(f"Erro ao exportar: {ex}")
+
+    async def on_restore_click(_):
+        files = await page.backup_import_picker.pick_files(allowed_extensions=["db"])
+        if files:
+            try:
+                shutil.copy(files[0].path, "atamaster.db")
+                show_snack("Backup importado com sucesso! Reinicie o aplicativo.")
+            except Exception as ex:
+                show_snack(f"Erro ao importar: {ex}")
+
+    async def on_excel_click(_):
+        files = await page.excel_picker.pick_files(allowed_extensions=["xlsx", "xls"])
+        if files:
+            path = files[0].path
+            page.last_excel_path = path
+            await import_excel(path)
+
+    async def on_excel_refresh(_):
+        if page.last_excel_path: await import_excel(page.last_excel_path)
         else: show_snack("Nenhuma planilha selecionada anteriormente.")
 
     page.on_backup_click = on_backup_click
@@ -522,7 +517,7 @@ def main(page: ft.Page):
     page.on_excel_refresh = on_excel_refresh
 
     sidebar = Sidebar(page); content_container = ft.Container(expand=True, padding=30, bgcolor=ft.Colors.SURFACE); content_container.content = DashboardView(page)
-    def route_change(route):
+    async def route_change(route):
         troute = ft.TemplateRoute(page.route)
         if troute.match("/"): content_container.content = DashboardView(page)
         elif troute.match("/management"): content_container.content = ManagementView(page)
@@ -532,7 +527,7 @@ def main(page: ft.Page):
         page.update()
     page.on_route_change = route_change
     layout = ft.Row([sidebar, ft.VerticalDivider(width=1, color=ft.Colors.GREY_900), ft.Container(content=content_container, expand=True)], expand=True, spacing=0)
-    page.add(layout); page.go(page.route)
+    page.add(layout); await page.go(page.route)
 
 if __name__ == "__main__":
     ft.run(main)
