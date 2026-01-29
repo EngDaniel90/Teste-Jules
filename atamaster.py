@@ -82,12 +82,6 @@ def create_group(name, description=None):
 def get_groups():
     with get_session() as session: return session.query(Group).all()
 
-def update_group(group_id, name, description):
-    with get_session() as session:
-        group = session.query(Group).filter(Group.id == group_id).first()
-        if group: group.name = name; group.description = description; session.commit()
-        return group
-
 def delete_group(group_id):
     with get_session() as session:
         group = session.query(Group).filter(Group.id == group_id).first()
@@ -129,7 +123,9 @@ def create_task(meeting_id, description, responsible_id, date1=None, date2=None,
 def get_tasks_by_meeting(meeting_id):
     with get_session() as session:
         m = session.query(Meeting).filter(Meeting.id == meeting_id).first()
-        return [t for t in m.tasks] if m else []
+        if not m: return []
+        # Accessing m.tasks inside session or before session closes
+        return [t for t in m.tasks]
 
 def update_task_status(task_id, status):
     with get_session() as session:
@@ -145,7 +141,6 @@ def get_open_tasks_for_group(group_id):
 
 def carry_over_tasks(group_id, new_meeting_id):
     with get_session() as session:
-        # Get all tasks discussed in any meeting of this group that are still OPEN
         open_tasks = session.query(Task).join(meeting_tasks).join(Meeting)\
             .filter(Meeting.group_id == group_id)\
             .filter(Task.status == StatusEnum.OPEN).distinct().all()
@@ -211,15 +206,33 @@ class Sidebar(ft.Container):
             self.nav_item(ft.Icons.GROUP, "Grupos & Pessoas", "/management"),
             self.nav_item(ft.Icons.FOLDER, "Minhas Atas", "/meetings"),
             ft.Divider(color=ft.Colors.GREY_800),
-            ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=ft.Colors.CYAN_400), ft.Text("Nova Reunião", color=ft.Colors.CYAN_400, weight="bold")]), padding=10, border=ft.Border.all(1, ft.Colors.CYAN_900), border_radius=10, on_click=lambda _: self.m_page.go("/new_meeting"))
-        ])
+            ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=ft.Colors.CYAN_400), ft.Text("Nova Reunião", color=ft.Colors.CYAN_400, weight="bold")]), padding=10, border=ft.Border.all(1, ft.Colors.CYAN_900), border_radius=10, on_click=lambda _: self.m_page.go("/new_meeting")),
+            ft.Spacer(),
+            ft.Text("Developed by Daniel Alves Anversi", size=10, color=ft.Colors.GREY_500, italic=True)
+        ], expand=True)
     def nav_item(self, icon, text, route): return ft.Container(content=ft.Row([ft.Icon(icon), ft.Text(text)]), padding=10, border_radius=10, on_click=lambda _: self.m_page.go(route), ink=True)
 
 class DashboardView(ft.Column):
     def __init__(self, page):
         super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page
         try:
-            self.controls = [ft.Text("Dashboard", size=28, weight="bold"), ft.Text("Visão geral de tarefas e alertas", color=ft.Colors.GREY_400), ft.Divider(height=20, color=ft.Colors.TRANSPARENT), self.get_summary_cards(), ft.Divider(height=20, color=ft.Colors.TRANSPARENT), ft.Text("Alertas Críticos (3º Prazo Vencido)", size=18, weight="bold", color=ft.Colors.RED_400), self.get_critical_tasks()]
+            self.controls = [
+                ft.Row([
+                    ft.Column([
+                        ft.Text("Dashboard", size=28, weight="bold"),
+                        ft.Text("Visão geral de tarefas e alertas", color=ft.Colors.GREY_400),
+                    ]),
+                    ft.Row([
+                        ft.FilledButton("Exportar Backup", icon=ft.Icons.DOWNLOAD, on_click=lambda _: self.m_page.export_picker.save_file(file_name="atamaster_backup.db")),
+                        ft.FilledButton("Importar Backup", icon=ft.Icons.UPLOAD, on_click=lambda _: self.m_page.import_picker.pick_files()),
+                    ], spacing=10)
+                ], alignment="spaceBetween"),
+                ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
+                self.get_summary_cards(),
+                ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
+                ft.Text("Alertas Críticos (3º Prazo Vencido)", size=18, weight="bold", color=ft.Colors.RED_400),
+                self.get_critical_tasks()
+            ]
         except Exception as e: self.controls = [ft.Text(f"Error: {e}")]
     def get_summary_cards(self):
         with get_session() as session:
@@ -238,40 +251,62 @@ class DashboardView(ft.Column):
 
 class ManagementView(ft.Column):
     def __init__(self, page):
-        super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.refresh()
-    def refresh(self):
-        self.controls = [ft.Text("Gestão de Grupos & Pessoas", size=28, weight="bold"), ft.Divider(height=20, color=ft.Colors.TRANSPARENT), ft.Tabs(selected_index=0, animation_duration=300, tabs=[ft.Tab(text="Grupos", content=self.group_tab()), ft.Tab(text="Participantes", content=self.participant_tab()), ft.Tab(text="Estilos & Backup", content=self.backup_tab())], expand=True)]
-        self.update()
+        super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.refresh(initial=True)
+    def refresh(self, initial=False):
+        self.controls = [
+            ft.Text("Gestão de Grupos & Pessoas", size=28, weight="bold"),
+            ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
+            ft.Tabs(selected_index=0, animation_duration=300, tabs=[
+                ft.Tab(label="Grupos", content=self.group_tab()),
+                ft.Tab(label="Participantes", content=self.participant_tab()),
+                ft.Tab(label="Estilos & Backup", content=self.backup_tab())
+            ], expand=True)
+        ]
+        if not initial: self.update()
     def group_tab(self):
         groups = get_groups(); group_list = ft.Column(spacing=10)
         for g in groups: group_list.controls.append(ft.ListTile(title=ft.Text(g.name), subtitle=ft.Text(g.description or "Sem descrição"), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, gid=g.id: self.del_group(gid))))
         name_input = ft.TextField(label="Nome do Grupo", expand=True); desc_input = ft.TextField(label="Descrição", expand=True)
         def add_g(_):
             if name_input.value: create_group(name_input.value, desc_input.value); name_input.value = ""; desc_input.value = ""; self.refresh()
-        return ft.Column([ft.Row([name_input, desc_input, ft.ElevatedButton("Adicionar Grupo", on_click=add_g)]), ft.Divider(), group_list])
+        return ft.Column([ft.Row([name_input, desc_input, ft.FilledButton("Adicionar Grupo", on_click=add_g)]), ft.Divider(), group_list])
     def participant_tab(self):
         participants = get_participants(); p_list = ft.Column(spacing=10)
         for p in participants: p_list.controls.append(ft.ListTile(title=ft.Text(p.name), subtitle=ft.Text(f"{p.company or 'N/A'} • {p.email or 'N/A'}"), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, pid=p.id: self.del_participant(pid))))
         name_input = ft.TextField(label="Nome", expand=True); email_input = ft.TextField(label="Email", expand=True); company_input = ft.TextField(label="Empresa", expand=True)
         def add_p(_):
             if name_input.value: create_participant(name_input.value, email_input.value, company_input.value); name_input.value = ""; email_input.value = ""; company_input.value = ""; self.refresh()
-        return ft.Column([ft.Row([name_input, email_input, company_input, ft.ElevatedButton("Adicionar Participante", on_click=add_p)]), ft.Divider(), p_list])
+        return ft.Column([ft.Row([name_input, email_input, company_input, ft.FilledButton("Adicionar Participante", on_click=add_p)]), ft.Divider(), p_list])
     def backup_tab(self):
-        def on_backup_result(e: ft.FilePickerResultEvent):
-            if e.path: shutil.copy("atamaster.db", e.path); self.m_page.show_snack_bar(ft.SnackBar(ft.Text(f"Backup exportado para {e.path}")))
-        def on_restore_result(e: ft.FilePickerResultEvent):
-            if e.files: shutil.copy(e.files[0].path, "atamaster.db"); self.m_page.show_snack_bar(ft.SnackBar(ft.Text("Backup importado com sucesso! Reinicie o aplicativo.")))
-        self.export_picker = ft.FilePicker(on_result=on_backup_result); self.import_picker = ft.FilePicker(on_result=on_restore_result); self.m_page.overlay.extend([self.export_picker, self.import_picker])
         def change_theme(mode): self.m_page.theme_mode = ft.ThemeMode.DARK if mode == "DARK" else ft.ThemeMode.LIGHT; self.m_page.update()
         def change_color(color): self.m_page.theme = ft.Theme(color_scheme_seed=color); self.m_page.update()
-        return ft.Column([ft.Text("Personalização Visual", weight="bold"), ft.Row([ft.ElevatedButton("Modo Escuro", icon=ft.Icons.DARK_MODE, on_click=lambda _: change_theme("DARK")), ft.ElevatedButton("Modo Claro", icon=ft.Icons.LIGHT_MODE, on_click=lambda _: change_theme("LIGHT"))]), ft.Text("Cor Principal:"), ft.Row([ft.ElevatedButton("Azul", bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE, on_click=lambda _: change_color(ft.Colors.BLUE)), ft.ElevatedButton("Verde", bgcolor=ft.Colors.GREEN, color=ft.Colors.WHITE, on_click=lambda _: change_color(ft.Colors.GREEN)), ft.ElevatedButton("Laranja", bgcolor=ft.Colors.ORANGE, color=ft.Colors.WHITE, on_click=lambda _: change_color(ft.Colors.ORANGE))]), ft.Divider(), ft.Text("Backup do Banco de Dados", weight="bold"), ft.Text("Exporte ou importe todos os dados do aplicativo (atas, grupos, participantes)."), ft.Row([ft.ElevatedButton("Exportar Backup", icon=ft.Icons.DOWNLOAD, on_click=lambda _: self.export_picker.save_file(file_name="atamaster_backup.db")), ft.ElevatedButton("Importar Backup", icon=ft.Icons.UPLOAD, on_click=lambda _: self.import_picker.pick_files())])], padding=20)
+        return ft.Column([
+            ft.Text("Personalização Visual", weight="bold"),
+            ft.Row([
+                ft.FilledButton("Modo Escuro", icon=ft.Icons.DARK_MODE, on_click=lambda _: change_theme("DARK")),
+                ft.FilledButton("Modo Claro", icon=ft.Icons.LIGHT_MODE, on_click=lambda _: change_theme("LIGHT"))
+            ]),
+            ft.Text("Cor Principal:"),
+            ft.Row([
+                ft.FilledButton("Azul", bgcolor=ft.Colors.BLUE, color=ft.Colors.WHITE, on_click=lambda _: change_color(ft.Colors.BLUE)),
+                ft.FilledButton("Verde", bgcolor=ft.Colors.GREEN, color=ft.Colors.WHITE, on_click=lambda _: change_color(ft.Colors.GREEN)),
+                ft.FilledButton("Laranja", bgcolor=ft.Colors.ORANGE, color=ft.Colors.WHITE, on_click=lambda _: change_color(ft.Colors.ORANGE))
+            ]),
+            ft.Divider(),
+            ft.Text("Backup do Banco de Dados", weight="bold"),
+            ft.Text("Exporte ou importe todos os dados do aplicativo (atas, grupos, participantes)."),
+            ft.Row([
+                ft.FilledButton("Exportar Backup", icon=ft.Icons.DOWNLOAD, on_click=lambda _: self.m_page.export_picker.save_file(file_name="atamaster_backup.db")),
+                ft.FilledButton("Importar Backup", icon=ft.Icons.UPLOAD, on_click=lambda _: self.m_page.import_picker.pick_files())
+            ])
+        ], padding=20)
     def del_participant(self, pid): delete_participant(pid); self.refresh()
     def del_group(self, gid): delete_group(gid); self.refresh()
 
 class MeetingsListView(ft.Column):
     def __init__(self, page):
-        super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.refresh()
-    def refresh(self):
+        super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.refresh(initial=True)
+    def refresh(self, initial=False):
         self.controls = [ft.Text("Minhas Atas", size=28, weight="bold"), ft.Text("Atas organizadas por grupo de reunião", color=ft.Colors.GREY_400), ft.Divider(height=20, color=ft.Colors.TRANSPARENT)]
         groups = get_groups()
         if not groups: self.controls.append(ft.Text("Nenhum grupo encontrado. Crie um grupo primeiro.", color=ft.Colors.GREY_500))
@@ -283,7 +318,7 @@ class MeetingsListView(ft.Column):
                 else:
                     for m in meetings: group_tile.controls.append(ft.ListTile(leading=ft.Icon(ft.Icons.EVENT_NOTE, size=20), title=ft.Text(m.title), subtitle=ft.Text(f"{m.date.strftime('%d/%m/%Y')} • {m.location or 'Sem local'}"), trailing=ft.IconButton(ft.Icons.PICTURE_AS_PDF, on_click=lambda _, mid=m.id: self.generate_pdf_click(mid)), on_click=lambda _, mid=m.id: self.view_meeting(mid)))
                 self.controls.append(group_tile)
-        self.update()
+        if not initial: self.update()
     def view_meeting(self, mid): self.m_page.go(f"/meeting/{mid}")
     def generate_pdf_click(self, mid):
         filename = generate_pdf(mid)
@@ -293,10 +328,10 @@ class TaskEditor(ft.Container):
     def __init__(self, on_add_task, page):
         super().__init__()
         self.m_page = page; self.on_add_task = on_add_task; self.participants = get_participants()
-        self.desc_input = ft.TextField(label="Descrição da Tarefa", multiline=True)
+        self.desc_input = ft.TextField(label="Descrição da Tarefa", multiline=True, expand=True)
         self.resp_dropdown = ft.Dropdown(label="Responsável", options=[ft.DropdownOption(str(p.id), p.name) for p in self.participants])
         self.date1 = ft.TextField(label="Prazo 1 (DD/MM/YYYY)", width=150); self.date2 = ft.TextField(label="Prazo 2 (DD/MM/YYYY)", width=150); self.date3 = ft.TextField(label="Prazo 3 (DD/MM/YYYY)", width=150)
-        self.content = ft.Column([ft.Text("Adicionar Tarefa", weight="bold"), self.desc_input, ft.Row([self.resp_dropdown, self.date1, self.date2, self.date3]), ft.ElevatedButton("Adicionar à Lista", on_click=self.add_clicked)])
+        self.content = ft.Column([ft.Text("Adicionar Tarefa", weight="bold"), ft.Row([self.desc_input]), ft.Row([self.resp_dropdown, self.date1, self.date2, self.date3]), ft.FilledButton("Adicionar à Lista", on_click=self.add_clicked)])
     def add_clicked(self, _):
         if self.desc_input.value and self.resp_dropdown.value:
             d1 = self.parse_date(self.date1.value); d2 = self.parse_date(self.date2.value); d3 = self.parse_date(self.date3.value)
@@ -313,7 +348,7 @@ class NewMeetingView(ft.Column):
         self.group_sel = ft.Dropdown(label="Selecionar Grupo", options=[ft.DropdownOption(str(g.id), g.name) for g in self.groups], on_select=self.group_changed)
         self.title_input = ft.TextField(label="Título da Reunião", value="Reunião Semanal"); self.location_input = ft.TextField(label="Local", value="Online")
         self.tasks_list_display = ft.Column(); self.task_editor = TaskEditor(self.add_task_to_list, page)
-        self.controls = [ft.Text("Nova Reunião", size=28, weight="bold"), ft.Row([self.group_sel, self.title_input, self.location_input]), ft.Divider(), ft.Text("Pauta (Itens Novos e Importados)", size=18, weight="bold"), self.tasks_list_display, ft.Divider(), self.task_editor, ft.Divider(), ft.ElevatedButton("Salvar e Gerar Ata", icon=ft.Icons.SAVE, on_click=self.save_meeting)]
+        self.controls = [ft.Text("Nova Reunião", size=28, weight="bold"), ft.Row([self.group_sel, self.title_input, self.location_input]), ft.Divider(), ft.Text("Pauta (Itens Novos e Importados)", size=18, weight="bold"), self.tasks_list_display, ft.Divider(), self.task_editor, ft.Divider(), ft.FilledButton("Salvar e Gerar Ata", icon=ft.Icons.SAVE, on_click=self.save_meeting)]
     def group_changed(self, _):
         if not self.group_sel.value: return
         gid = int(self.group_sel.value); open_tasks = get_open_tasks_for_group(gid); self.tasks_to_add = []
@@ -341,6 +376,16 @@ class NewMeetingView(ft.Column):
 def main(page: ft.Page):
     page.title = "AtaMaster Pro"; page.theme_mode = ft.ThemeMode.DARK; page.padding = 0; page.window_min_width = 1100; page.window_min_height = 750
     init_db()
+
+    # File Pickers
+    def on_backup_result(e: ft.FilePickerResultEvent):
+        if e.path: shutil.copy("atamaster.db", e.path); page.show_snack_bar(ft.SnackBar(ft.Text(f"Backup exportado para {e.path}")))
+    def on_restore_result(e: ft.FilePickerResultEvent):
+        if e.files: shutil.copy(e.files[0].path, "atamaster.db"); page.show_snack_bar(ft.SnackBar(ft.Text("Backup importado com sucesso! Reinicie o aplicativo.")))
+    page.export_picker = ft.FilePicker(on_result=on_backup_result)
+    page.import_picker = ft.FilePicker(on_result=on_restore_result)
+    page.overlay.extend([page.export_picker, page.import_picker])
+
     sidebar = Sidebar(page); content_container = ft.Container(expand=True, padding=30, bgcolor=ft.Colors.SURFACE); content_container.content = DashboardView(page)
     def route_change(route):
         if page.route == "/": content_container.content = DashboardView(page)
@@ -353,4 +398,4 @@ def main(page: ft.Page):
     page.add(layout); page.go(page.route)
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(main)

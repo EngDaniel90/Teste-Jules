@@ -26,7 +26,7 @@ def generate_manual():
     elements.append(Paragraph("Manual do Usuário: AtaMaster Pro", title_style))
     elements.append(Paragraph("Sistema Moderno de Gestão de Atas de Reunião", styles['Heading2']))
     elements.append(Spacer(1, 50))
-    elements.append(Paragraph("Desenvolvido por: Jules (AI Assistant)", normal_style))
+    elements.append(Paragraph("Desenvolvido por: Daniel Alves Anversi", normal_style))
     elements.append(Paragraph(f"Data: 28/05/2025", normal_style))
     elements.append(PageBreak())
 
@@ -35,6 +35,10 @@ def generate_manual():
     elements.append(Paragraph(
         "A tela inicial fornece uma visão geral rápida do sistema. Ela exibe cartões informativos com o total de tarefas, "
         "tarefas em aberto e, mais importante, o número de Alertas Críticos.", normal_style))
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph(
+        "Agora, o Dashboard também conta com botões de atalho para **Exportar** e **Importar** backups, permitindo "
+        "o salvamento e a restauração rápida de suas atas logo ao abrir o programa.", normal_style))
     elements.append(Spacer(1, 12))
     elements.append(Paragraph(
         "O sistema monitora automaticamente os três prazos definidos para cada tarefa. Quando o terceiro prazo é ultrapassado "
@@ -80,7 +84,7 @@ def generate_manual():
     # --- 5. Backup e Restauração ---
     elements.append(Paragraph("5. Backup e Restauração", header_style))
     elements.append(Paragraph(
-        "Para garantir a segurança dos seus dados, o sistema oferece uma funcionalidade de Backup no mesmo menu de Estilos.", normal_style))
+        "Para garantir a segurança dos seus dados, o sistema oferece uma funcionalidade de Backup no Dashboard ou no menu de Estilos.", normal_style))
     elements.append(Spacer(1, 12))
     elements.append(Paragraph(
         "- **Exportar Backup:** Cria uma cópia de segurança de todo o banco de dados (.db) em um local de sua escolha.", normal_style))
