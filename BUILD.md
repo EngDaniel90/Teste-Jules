@@ -1,46 +1,38 @@
-# Guia de Criação do Executável (.exe) - AtaMaster Pro
+# Guia para Criação do Executável (.exe) - AtaMaster Pro
 
-Este guia descreve como transformar o script Python `atamaster.py` em um arquivo executável standalone para Windows.
+Para transformar o script `atamaster.py` em um arquivo executável para Windows, siga os passos abaixo:
 
-## Pré-requisitos
+## 1. Instalar o PyInstaller e Flet
 
-Antes de começar, certifique-se de ter o Python instalado e as bibliotecas necessárias. Abra o terminal (Prompt de Comando ou PowerShell) e execute:
-
-```bash
-pip install flet reportlab sqlalchemy
-```
-
-Além disso, instale o pacote que lidará com a criação do executável:
+Abra o terminal ou prompt de comando e instale as ferramentas necessárias:
 
 ```bash
-pip install pyinstaller
+pip install pyinstaller flet sqlalchemy reportlab
 ```
 
-## Passo a Passo para Gerar o Executável
+## 2. Gerar o Executável
 
-O Flet possui um comando simplificado para empacotar aplicações. Siga estes passos:
-
-1. **Abra o Terminal** na pasta onde está o arquivo `atamaster.py`.
-2. **Execute o comando abaixo**:
+O Flet possui uma ferramenta integrada que simplifica o uso do PyInstaller. Execute o comando abaixo na pasta do projeto:
 
 ```bash
 flet pack atamaster.py --name "AtaMasterPro" --icon "icon.ico"
 ```
 
-*Nota: Se você não tiver um arquivo `icon.ico`, você pode omitir o parâmetro `--icon` ou usar um arquivo .png que o Flet converterá automaticamente.*
+*Nota: Se você não tiver um arquivo `icon.ico`, remova o parâmetro `--icon "icon.ico"`.*
 
-### O que o comando faz:
-- Ele utiliza o `PyInstaller` internamente para agrupar o script e todas as dependências (como SQLAlchemy e ReportLab) em um único arquivo.
-- O executável final será criado dentro de uma pasta chamada `dist`.
+## 3. Localizar o Programa
 
-## Dicas Importantes
+Após a conclusão, uma pasta chamada `dist` será criada. Dentro dela, você encontrará o arquivo `AtaMasterPro.exe`.
 
-- **Arquivo Único:** Se você preferir um único arquivo executável (em vez de uma pasta), o comando acima já tenta fazer isso por padrão no Flet.
-- **Portabilidade:** O banco de dados `atamaster.db` será criado na mesma pasta onde o executável for rodado pela primeira vez. Para levar seus dados para outro computador, lembre-se de levar o arquivo `.db` junto ou utilizar a função de **Backup/Exportar** dentro do programa.
-- **Windows Only:** Para gerar um `.exe` para Windows, você deve executar o comando `flet pack` em um computador com Windows.
+## 4. Distribuição
 
-## Solução de Problemas
+Para que o programa funcione em outros computadores:
+- Você só precisa enviar o arquivo `.exe` da pasta `dist`.
+- O banco de dados (`atamaster.db`) será criado automaticamente na primeira execução se não existir.
+- Não é necessário que a outra pessoa tenha Python instalado.
 
-Se o executável fechar imediatamente ao abrir:
-1. Tente rodar o comando `flet pack` sem o parâmetro `--noconsole` (se estiver usando PyInstaller puro) para ver se há erros de importação.
-2. Certifique-se de que todas as bibliotecas (sqlalchemy, reportlab, flet) estão instaladas no ambiente onde você está compilando.
+## Dicas de Arquitetura
+
+- **Portabilidade:** O programa salva os dados no mesmo local onde o executável está rodando.
+- **Auto-Contido:** Todas as dependências (SQLAlchemy, ReportLab) são embutidas no executável pelo comando `flet pack`.
+- **Compatibilidade:** O código foi ajustado para funcionar com a versão 0.80.4 do Flet, garantindo estabilidade visual.

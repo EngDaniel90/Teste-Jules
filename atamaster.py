@@ -201,12 +201,12 @@ class Sidebar(ft.Container):
         super().__init__()
         self.m_page = page; self.width = 250; self.bgcolor = ft.Colors.SURFACE_CONTAINER; self.padding = 20
         self.content = ft.Column([
-            ft.Container(content=ft.Row([ft.Icon(ft.Icons.POLYMER, color=ft.Colors.CYAN_400, size=30), ft.Text("ATA MASTER", size=20, weight="bold")]), margin=ft.margin.only(bottom=40)),
+            ft.Container(content=ft.Row([ft.Icon(ft.Icons.POLYMER, color=ft.Colors.CYAN_400, size=30), ft.Text("ATA MASTER", size=20, weight="bold")]), margin=ft.Margin.only(bottom=40)),
             self.nav_item(ft.Icons.DASHBOARD, "Dashboard", "/"),
             self.nav_item(ft.Icons.GROUP, "Grupos & Pessoas", "/management"),
             self.nav_item(ft.Icons.FOLDER, "Minhas Atas", "/meetings"),
             ft.Divider(color=ft.Colors.GREY_800),
-            ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=ft.Colors.CYAN_400), ft.Text("Nova Reunião", color=ft.Colors.CYAN_400, weight="bold")]), padding=10, border=ft.border.all(1, ft.Colors.CYAN_900), border_radius=10, on_click=lambda _: self.m_page.go("/new_meeting")),
+            ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=ft.Colors.CYAN_400), ft.Text("Nova Reunião", color=ft.Colors.CYAN_400, weight="bold")]), padding=10, border=ft.Border.all(1, ft.Colors.CYAN_900), border_radius=10, on_click=lambda _: self.m_page.go("/new_meeting")),
             ft.Container(expand=True),
             ft.Text("Developed by Daniel Alves Anversi", size=10, color=ft.Colors.GREY_500, italic=True)
         ], expand=True)
@@ -223,8 +223,8 @@ class DashboardView(ft.Column):
                         ft.Text("Visão geral de tarefas e alertas", color=ft.Colors.GREY_400),
                     ]),
                     ft.Row([
-                        ft.FilledButton("Exportar Backup", icon=ft.Icons.DOWNLOAD, on_click=lambda _: self.m_page.export_picker.save_file(file_name="atamaster_backup.db")),
-                        ft.FilledButton("Importar Backup", icon=ft.Icons.UPLOAD, on_click=lambda _: self.m_page.import_picker.pick_files()),
+                        ft.FilledButton("Exportar Backup", icon=ft.Icons.DOWNLOAD, on_click=self.m_page.on_backup_click),
+                        ft.FilledButton("Importar Backup", icon=ft.Icons.UPLOAD, on_click=self.m_page.on_restore_click),
                     ], spacing=10)
                 ], alignment="spaceBetween"),
                 ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
@@ -259,18 +259,30 @@ class DashboardView(ft.Column):
 
 class ManagementView(ft.Column):
     def __init__(self, page):
-        super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.refresh(initial=True)
+        super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.selected_tab = "groups"; self.refresh(initial=True)
     def refresh(self, initial=False):
+        content = ft.Container()
+        if self.selected_tab == "groups": content = self.group_tab()
+        elif self.selected_tab == "participants": content = self.participant_tab()
+        else: content = self.backup_tab()
+
+        def tab_changed(e):
+            self.selected_tab = e.data if hasattr(e, "data") else e.control.value
+            self.refresh()
+
         self.controls = [
             ft.Text("Gestão de Grupos & Pessoas", size=28, weight="bold"),
             ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
-            ft.Tabs(selected_index=0, animation_duration=300, tabs=[
-                ft.Tab(label="Grupos", content=self.group_tab()),
-                ft.Tab(label="Participantes", content=self.participant_tab()),
-                ft.Tab(label="Estilos & Backup", content=self.backup_tab())
-            ], expand=True)
+            ft.Row([
+                ft.TextButton("Grupos", on_click=lambda _: self.set_tab("groups"), variant=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab == "groups" else None)),
+                ft.TextButton("Participantes", on_click=lambda _: self.set_tab("participants"), variant=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab == "participants" else None)),
+                ft.TextButton("Estilos & Backup", on_click=lambda _: self.set_tab("backup"), variant=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab == "backup" else None)),
+            ]),
+            ft.Divider(),
+            content
         ]
         if not initial: self.update()
+    def set_tab(self, tab): self.selected_tab = tab; self.refresh()
     def group_tab(self):
         groups = get_groups(); group_list = ft.Column(spacing=10)
         for g in groups: group_list.controls.append(ft.ListTile(title=ft.Text(g.name), subtitle=ft.Text(g.description or "Sem descrição"), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, gid=g.id: self.del_group(gid))))
@@ -304,8 +316,8 @@ class ManagementView(ft.Column):
             ft.Text("Backup do Banco de Dados", weight="bold"),
             ft.Text("Exporte ou importe todos os dados do aplicativo (atas, grupos, participantes)."),
             ft.Row([
-                ft.FilledButton("Exportar Backup", icon=ft.Icons.DOWNLOAD, on_click=lambda _: self.m_page.export_picker.save_file(file_name="atamaster_backup.db")),
-                ft.FilledButton("Importar Backup", icon=ft.Icons.UPLOAD, on_click=lambda _: self.m_page.import_picker.pick_files())
+                ft.FilledButton("Exportar Backup", icon=ft.Icons.DOWNLOAD, on_click=self.m_page.on_backup_click),
+                ft.FilledButton("Importar Backup", icon=ft.Icons.UPLOAD, on_click=self.m_page.on_restore_click)
             ])
         ], padding=20)
     def del_participant(self, pid): delete_participant(pid); self.refresh()
@@ -431,14 +443,17 @@ def main(page: ft.Page):
         snack.open = True
         page.update()
 
-    # File Pickers
-    def on_backup_result(e):
-        if e.path: shutil.copy("atamaster.db", e.path); show_snack(f"Backup exportado para {e.path}")
-    def on_restore_result(e):
-        if e.files: shutil.copy(e.files[0].path, "atamaster.db"); show_snack("Backup importado com sucesso! Reinicie o aplicativo.")
-    page.export_picker = ft.FilePicker(); page.export_picker.on_result = on_backup_result
-    page.import_picker = ft.FilePicker(); page.import_picker.on_result = on_restore_result
-    page.overlay.extend([page.export_picker, page.import_picker])
+    # Backup/Restore (Simplified due to FilePicker issues in 0.80.4)
+    def on_backup_click(_):
+        try: shutil.copy("atamaster.db", "atamaster_backup.db"); show_snack("Backup criado como 'atamaster_backup.db'")
+        except Exception as e: show_snack(f"Erro no backup: {e}")
+    page.on_backup_click = on_backup_click
+
+    def on_restore_click(_):
+        if os.path.exists("atamaster_backup.db"):
+            shutil.copy("atamaster_backup.db", "atamaster.db"); show_snack("Backup restaurado de 'atamaster_backup.db'. Reinicie.")
+        else: show_snack("Arquivo 'atamaster_backup.db' não encontrado.")
+    page.on_restore_click = on_restore_click
 
     sidebar = Sidebar(page); content_container = ft.Container(expand=True, padding=30, bgcolor=ft.Colors.SURFACE); content_container.content = DashboardView(page)
     def route_change(route):
@@ -454,4 +469,4 @@ def main(page: ft.Page):
     page.add(layout); page.go(page.route)
 
 if __name__ == "__main__":
-    ft.app(target=main)
+    ft.run(main)
