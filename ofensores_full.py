@@ -7,6 +7,8 @@ import seaborn as sns
 import os
 import matplotlib.dates as mdates
 import numpy as np
+import schedule
+import time
 
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
 PATH_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx"
@@ -790,8 +792,10 @@ def enviar_mensagem_julius(dados):
         print(f"ERRO CRÍTICO ao enviar e-mail para Julius: {str(e)}\n{erro_detalhado}")
 
 
-# --- EXECUÇÃO PRINCIPAL ---
-if __name__ == "__main__":
+def execute_full_report_process():
+    """
+    Executa o processo completo de geração de relatórios para Topside, E-House e Vendors.
+    """
     print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
 
     # --- FLUXO 1: Relatório Principal (Topside) ---
@@ -865,3 +869,24 @@ if __name__ == "__main__":
         enviar_email_de_falha([str(e)])
 
     print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
+
+
+# --- AGENDAMENTO E EXECUÇÃO CONTÍNUA ---
+if __name__ == "__main__":
+    # Agenda a execução da função para os horários especificados
+    schedule.every().day.at("03:00").do(execute_full_report_process)
+    schedule.every().day.at("08:00").do(execute_full_report_process)
+    schedule.every().day.at("11:30").do(execute_full_report_process)
+    schedule.every().day.at("16:00").do(execute_full_report_process)
+    schedule.every().day.at("19:00").do(execute_full_report_process)
+    schedule.every().day.at("23:30").do(execute_full_report_process)
+
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Agendamento configurado. O script está em execução e aguardando os horários programados.")
+    print("Próximas execuções:")
+    for job in schedule.jobs:
+        print(f"- {job.next_run.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # Loop infinito para manter o script em execução e verificar o agendamento
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
