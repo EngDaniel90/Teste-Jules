@@ -25,7 +25,7 @@ Para que o programa funcione e possa ser compilado, a seguinte estrutura deve se
 1. Certifique-se de ter o Python 3.10 ou superior instalado.
 2. Instale as dependências:
    ```bash
-   pip install flet sqlalchemy reportlab
+   pip install flet sqlalchemy reportlab openpyxl
    ```
 3. Execute o programa:
    ```bash
@@ -37,7 +37,7 @@ Para que o programa funcione e possa ser compilado, a seguinte estrutura deve se
 - **Grupos de Reunião:** Organize suas atas por contexto (ex: "Engenharia", "Diretoria").
 - **Ata Viva:** Tarefas com status "OPEN" são importadas automaticamente para novas reuniões do mesmo grupo.
 - **Alertas de Prazo:** Sistema visual que destaca tarefas atrasadas, especialmente quando atingem o 3º prazo.
-- **Participantes e Empresas:** Cadastro simplificado de responsáveis e suas respectivas organizações.
+- **Participantes e Empresas:** Cadastro simplificado e importação em massa via Excel (Col A: Nome, Col B: Email).
 - **Exportação PDF:** Gera atas profissionais com tabelas, status e espaços para assinatura.
 - **Backup/Restore:** Sistema simplificado de segurança dos dados.
 

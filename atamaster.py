@@ -6,6 +6,10 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import enum
 import flet as ft
+try:
+    import openpyxl
+except ImportError:
+    openpyxl = None
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table as RelTable, TableStyle, Paragraph, Spacer
@@ -274,9 +278,9 @@ class ManagementView(ft.Column):
             ft.Text("Gestão de Grupos & Pessoas", size=28, weight="bold"),
             ft.Divider(height=20, color=ft.Colors.TRANSPARENT),
             ft.Row([
-                ft.TextButton("Grupos", on_click=lambda _: self.set_tab("groups"), variant=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab == "groups" else None)),
-                ft.TextButton("Participantes", on_click=lambda _: self.set_tab("participants"), variant=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab == "participants" else None)),
-                ft.TextButton("Estilos & Backup", on_click=lambda _: self.set_tab("backup"), variant=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab == "backup" else None)),
+                ft.TextButton("Grupos", on_click=lambda _: self.set_tab("groups"), style=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab == "groups" else None)),
+                ft.TextButton("Participantes", on_click=lambda _: self.set_tab("participants"), style=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab == "participants" else None)),
+                ft.TextButton("Estilos & Backup", on_click=lambda _: self.set_tab("backup"), style=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab == "backup" else None)),
             ]),
             ft.Divider(),
             content
@@ -296,7 +300,20 @@ class ManagementView(ft.Column):
         name_input = ft.TextField(label="Nome", expand=True); email_input = ft.TextField(label="Email", expand=True); company_input = ft.TextField(label="Empresa", expand=True)
         def add_p(_):
             if name_input.value: create_participant(name_input.value, email_input.value, company_input.value); name_input.value = ""; email_input.value = ""; company_input.value = ""; self.refresh()
-        return ft.Column([ft.Row([name_input, email_input, company_input, ft.FilledButton("Adicionar Participante", on_click=add_p)]), ft.Divider(), p_list])
+
+        excel_actions = ft.Row([
+            ft.Text("Importar de Excel (Col A: Nome, Col B: Email):", size=12, color=ft.Colors.GREY_400),
+            ft.FilledButton("Selecionar Planilha", icon=ft.Icons.UPLOAD_FILE, on_click=self.m_page.on_excel_click),
+            ft.IconButton(ft.Icons.REFRESH, tooltip="Atualizar da última planilha", on_click=self.m_page.on_excel_refresh)
+        ], alignment="start")
+
+        return ft.Column([
+            ft.Row([name_input, email_input, company_input, ft.FilledButton("Adicionar Participante", on_click=add_p)]),
+            ft.Divider(),
+            excel_actions,
+            ft.Divider(),
+            p_list
+        ])
     def backup_tab(self):
         def change_theme(mode): self.m_page.theme_mode = ft.ThemeMode.DARK if mode == "DARK" else ft.ThemeMode.LIGHT; self.m_page.update()
         def change_color(color): self.m_page.theme = ft.Theme(color_scheme_seed=color); self.m_page.update()
@@ -443,17 +460,66 @@ def main(page: ft.Page):
         snack.open = True
         page.update()
 
-    # Backup/Restore (Simplified due to FilePicker issues in 0.80.4)
-    def on_backup_click(_):
-        try: shutil.copy("atamaster.db", "atamaster_backup.db"); show_snack("Backup criado como 'atamaster_backup.db'")
-        except Exception as e: show_snack(f"Erro no backup: {e}")
-    page.on_backup_click = on_backup_click
+    # File Pickers
+    def on_backup_export_result(e):
+        if e.path:
+            try:
+                shutil.copy("atamaster.db", e.path)
+                show_snack(f"Backup exportado para {e.path}")
+            except Exception as ex:
+                show_snack(f"Erro ao exportar: {ex}")
 
-    def on_restore_click(_):
-        if os.path.exists("atamaster_backup.db"):
-            shutil.copy("atamaster_backup.db", "atamaster.db"); show_snack("Backup restaurado de 'atamaster_backup.db'. Reinicie.")
-        else: show_snack("Arquivo 'atamaster_backup.db' não encontrado.")
+    def on_backup_import_result(e):
+        if e.files:
+            try:
+                shutil.copy(e.files[0].path, "atamaster.db")
+                show_snack("Backup importado com sucesso! Reinicie o aplicativo.")
+            except Exception as ex:
+                show_snack(f"Erro ao importar: {ex}")
+
+    def on_excel_result(e):
+        if e.files:
+            path = e.files[0].path
+            page.last_excel_path = path
+            import_excel(path)
+
+    def import_excel(path):
+        if not openpyxl:
+            show_snack("Erro: Biblioteca 'openpyxl' não instalada."); return
+        try:
+            wb = openpyxl.load_workbook(path)
+            sheet = wb.active
+            count = 0
+            for row in sheet.iter_rows(min_row=1, values_only=True):
+                name = row[0]
+                email = row[1] if len(row) > 1 else None
+                if name and str(name).strip():
+                    create_participant(str(name), str(email) if email else None)
+                    count += 1
+            show_snack(f"Importados {count} participantes de {path}")
+            # Refresh management view if active
+            if page.route == "/management":
+                route_change(None)
+        except Exception as ex:
+            show_snack(f"Erro ao ler Excel: {ex}")
+
+    page.last_excel_path = None
+    page.backup_export_picker = ft.FilePicker(on_result=on_backup_export_result)
+    page.backup_import_picker = ft.FilePicker(on_result=on_backup_import_result)
+    page.excel_picker = ft.FilePicker(on_result=on_excel_result)
+    page.overlay.extend([page.backup_export_picker, page.backup_import_picker, page.excel_picker])
+
+    def on_backup_click(_): page.backup_export_picker.save_file(file_name="atamaster_backup.db")
+    def on_restore_click(_): page.backup_import_picker.pick_files(allowed_extensions=["db"])
+    def on_excel_click(_): page.excel_picker.pick_files(allowed_extensions=["xlsx", "xls"])
+    def on_excel_refresh(_):
+        if page.last_excel_path: import_excel(page.last_excel_path)
+        else: show_snack("Nenhuma planilha selecionada anteriormente.")
+
+    page.on_backup_click = on_backup_click
     page.on_restore_click = on_restore_click
+    page.on_excel_click = on_excel_click
+    page.on_excel_refresh = on_excel_refresh
 
     sidebar = Sidebar(page); content_container = ft.Container(expand=True, padding=30, bgcolor=ft.Colors.SURFACE); content_container.content = DashboardView(page)
     def route_change(route):

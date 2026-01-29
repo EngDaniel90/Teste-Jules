@@ -7,7 +7,7 @@ Para transformar o script `atamaster.py` em um arquivo executável para Windows,
 Abra o terminal ou prompt de comando e instale as ferramentas necessárias:
 
 ```bash
-pip install pyinstaller flet sqlalchemy reportlab
+pip install pyinstaller flet sqlalchemy reportlab openpyxl
 ```
 
 ## 2. Gerar o Executável
