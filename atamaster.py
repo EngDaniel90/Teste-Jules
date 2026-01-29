@@ -201,13 +201,13 @@ class Sidebar(ft.Container):
         super().__init__()
         self.m_page = page; self.width = 250; self.bgcolor = ft.Colors.SURFACE_CONTAINER; self.padding = 20
         self.content = ft.Column([
-            ft.Container(content=ft.Row([ft.Icon(ft.Icons.POLYMER, color=ft.Colors.CYAN_400, size=30), ft.Text("ATA MASTER", size=20, weight="bold")]), margin=ft.Margin.only(bottom=40)),
+            ft.Container(content=ft.Row([ft.Icon(ft.Icons.POLYMER, color=ft.Colors.CYAN_400, size=30), ft.Text("ATA MASTER", size=20, weight="bold")]), margin=ft.margin.only(bottom=40)),
             self.nav_item(ft.Icons.DASHBOARD, "Dashboard", "/"),
             self.nav_item(ft.Icons.GROUP, "Grupos & Pessoas", "/management"),
             self.nav_item(ft.Icons.FOLDER, "Minhas Atas", "/meetings"),
             ft.Divider(color=ft.Colors.GREY_800),
-            ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=ft.Colors.CYAN_400), ft.Text("Nova Reunião", color=ft.Colors.CYAN_400, weight="bold")]), padding=10, border=ft.Border.all(1, ft.Colors.CYAN_900), border_radius=10, on_click=lambda _: self.m_page.go("/new_meeting")),
-            ft.Spacer(),
+            ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=ft.Colors.CYAN_400), ft.Text("Nova Reunião", color=ft.Colors.CYAN_400, weight="bold")]), padding=10, border=ft.border.all(1, ft.Colors.CYAN_900), border_radius=10, on_click=lambda _: self.m_page.go("/new_meeting")),
+            ft.Container(expand=True),
             ft.Text("Developed by Daniel Alves Anversi", size=10, color=ft.Colors.GREY_500, italic=True)
         ], expand=True)
     def nav_item(self, icon, text, route): return ft.Container(content=ft.Row([ft.Icon(icon), ft.Text(text)]), padding=10, border_radius=10, on_click=lambda _: self.m_page.go(route), ink=True)
@@ -246,7 +246,15 @@ class DashboardView(ft.Column):
             tasks = session.query(Task).filter(Task.status == StatusEnum.OPEN, Task.date3 < now).all()
             if not tasks: return ft.Text("Nenhum alerta crítico no momento.", color=ft.Colors.GREY_500)
             task_list = ft.Column(spacing=10)
-            for task in tasks: task_list.controls.append(ft.Container(content=ft.Row([ft.Icon(ft.Icons.WARNING, color=ft.Colors.RED_400), ft.Column([ft.Text(task.description, weight="bold"), ft.Text(f"Responsável: {task.responsible.name if task.responsible else 'N/A'} • Prazo Final: {task.date3.strftime('%d/%m/%Y') if task.date3 else 'N/A'}", size=12)], expand=True)]), bgcolor=ft.Colors.RED_900, padding=15, border_radius=10))
+            for task in tasks:
+                def close_task(_, tid=task.id):
+                    update_task_status(tid, StatusEnum.CLOSED)
+                    self.m_page.go("/"); self.m_page.update() # Refresh
+                task_list.controls.append(ft.Container(content=ft.Row([
+                    ft.Icon(ft.Icons.WARNING, color=ft.Colors.RED_400),
+                    ft.Column([ft.Text(task.description, weight="bold"), ft.Text(f"Responsável: {task.responsible.name if task.responsible else 'N/A'} • Prazo Final: {task.date3.strftime('%d/%m/%Y') if task.date3 else 'N/A'}", size=12)], expand=True),
+                    ft.FilledButton("Concluir", icon=ft.Icons.CHECK, on_click=close_task)
+                ]), bgcolor=ft.Colors.RED_900, padding=15, border_radius=10))
             return task_list
 
 class ManagementView(ft.Column):
@@ -322,20 +330,27 @@ class MeetingsListView(ft.Column):
     def view_meeting(self, mid): self.m_page.go(f"/meeting/{mid}")
     def generate_pdf_click(self, mid):
         filename = generate_pdf(mid)
-        if filename: self.m_page.show_snack_bar(ft.SnackBar(ft.Text(f"PDF gerado: {filename}")))
+        if filename:
+            snack = ft.SnackBar(ft.Text(f"PDF gerado: {filename}"))
+            self.m_page.overlay.append(snack)
+            snack.open = True
+            self.m_page.update()
 
 class TaskEditor(ft.Container):
     def __init__(self, on_add_task, page):
         super().__init__()
         self.m_page = page; self.on_add_task = on_add_task; self.participants = get_participants()
         self.desc_input = ft.TextField(label="Descrição da Tarefa", multiline=True, expand=True)
-        self.resp_dropdown = ft.Dropdown(label="Responsável", options=[ft.DropdownOption(str(p.id), p.name) for p in self.participants])
+        self.resp_dropdown = ft.Dropdown(label="Responsável", options=[ft.dropdown.Option(str(p.id), p.name) for p in self.participants])
         self.date1 = ft.TextField(label="Prazo 1 (DD/MM/YYYY)", width=150); self.date2 = ft.TextField(label="Prazo 2 (DD/MM/YYYY)", width=150); self.date3 = ft.TextField(label="Prazo 3 (DD/MM/YYYY)", width=150)
         self.content = ft.Column([ft.Text("Adicionar Tarefa", weight="bold"), ft.Row([self.desc_input]), ft.Row([self.resp_dropdown, self.date1, self.date2, self.date3]), ft.FilledButton("Adicionar à Lista", on_click=self.add_clicked)])
     def add_clicked(self, _):
         if self.desc_input.value and self.resp_dropdown.value:
             d1 = self.parse_date(self.date1.value); d2 = self.parse_date(self.date2.value); d3 = self.parse_date(self.date3.value)
-            if not d3: self.m_page.show_snack_bar(ft.SnackBar(ft.Text("Erro: Formato de data inválido. Use DD/MM/YYYY."))); return
+            if not d3:
+                snack = ft.SnackBar(ft.Text("Erro: Formato de data inválido. Use DD/MM/YYYY."))
+                self.m_page.overlay.append(snack); snack.open = True; self.m_page.update()
+                return
             self.on_add_task(self.desc_input.value, int(self.resp_dropdown.value), d1, d2, d3)
             self.desc_input.value = ""; self.date1.value = ""; self.date2.value = ""; self.date3.value = ""; self.update()
     def parse_date(self, val):
@@ -345,7 +360,7 @@ class TaskEditor(ft.Container):
 class NewMeetingView(ft.Column):
     def __init__(self, page):
         super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.tasks_to_add = []; self.groups = get_groups()
-        self.group_sel = ft.Dropdown(label="Selecionar Grupo", options=[ft.DropdownOption(str(g.id), g.name) for g in self.groups], on_select=self.group_changed)
+        self.group_sel = ft.Dropdown(label="Selecionar Grupo", options=[ft.dropdown.Option(str(g.id), g.name) for g in self.groups], on_select=self.group_changed)
         self.title_input = ft.TextField(label="Título da Reunião", value="Reunião Semanal"); self.location_input = ft.TextField(label="Local", value="Online")
         self.tasks_list_display = ft.Column(); self.task_editor = TaskEditor(self.add_task_to_list, page)
         self.controls = [ft.Text("Nova Reunião", size=28, weight="bold"), ft.Row([self.group_sel, self.title_input, self.location_input]), ft.Divider(), ft.Text("Pauta (Itens Novos e Importados)", size=18, weight="bold"), self.tasks_list_display, ft.Divider(), self.task_editor, ft.Divider(), ft.FilledButton("Salvar e Gerar Ata", icon=ft.Icons.SAVE, on_click=self.save_meeting)]
@@ -364,7 +379,16 @@ class NewMeetingView(ft.Column):
             p_name = next((p.name for p in self.task_editor.participants if p.id == t["responsible_id"]), "N/A")
             color = ft.Colors.WHITE
             if t.get("date3") and t["date3"] < datetime.now(): color = ft.Colors.RED_400
-            self.tasks_list_display.controls.append(ft.Container(content=ft.Row([ft.Text(t["description"], expand=True, color=color), ft.Text(p_name, width=150), ft.Text("IMPORTADO" if not t["is_new"] else "NOVO", size=10, color=ft.Colors.GREY_500)]), padding=5))
+            def mark_closed(_, tid=t.get("id")):
+                if tid: update_task_status(tid, StatusEnum.CLOSED)
+                self.tasks_to_add = [task for task in self.tasks_to_add if task.get("id") != tid]
+                self.refresh_tasks_display()
+
+            actions = ft.Row([ft.Text("IMPORTADO" if not t["is_new"] else "NOVO", size=10, color=ft.Colors.GREY_500)])
+            if not t["is_new"]:
+                actions.controls.append(ft.IconButton(ft.Icons.CHECK_CIRCLE, tooltip="Marcar como Concluído", on_click=mark_closed))
+
+            self.tasks_list_display.controls.append(ft.Container(content=ft.Row([ft.Text(t["description"], expand=True, color=color), ft.Text(p_name, width=150), actions]), padding=5))
         self.update()
     def save_meeting(self, _):
         if not self.group_sel.value: return
@@ -373,29 +397,61 @@ class NewMeetingView(ft.Column):
             if t["is_new"]: create_task(m.id, t["description"], t["responsible_id"], t["date1"], t["date2"], t["date3"])
         self.m_page.go("/meetings")
 
+class MeetingDetailView(ft.Column):
+    def __init__(self, page, mid):
+        super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.mid = int(mid); self.refresh()
+    def refresh(self):
+        with get_session() as session:
+            m = session.query(Meeting).filter(Meeting.id == self.mid).first()
+            if not m: self.controls = [ft.Text("Reunião não encontrada.")]; return
+            self.controls = [
+                ft.Row([ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda _: self.m_page.go("/meetings")), ft.Text(m.title, size=28, weight="bold")]),
+                ft.Text(f"Grupo: {m.group.name} • Data: {m.date.strftime('%d/%m/%Y')}", color=ft.Colors.GREY_400),
+                ft.Divider(),
+                ft.Text("Tarefas da Reunião", size=18, weight="bold")
+            ]
+            for t in m.tasks:
+                def update_st(tid, status): update_task_status(tid, status); self.refresh(); self.update()
+                status_icon = ft.Icons.CHECK_BOX if t.status == StatusEnum.CLOSED else ft.Icons.CHECK_BOX_OUTLINE_BLANK
+                self.controls.append(ft.Container(content=ft.Row([
+                    ft.IconButton(status_icon, on_click=lambda _, tid=t.id, curr=t.status: update_st(tid, StatusEnum.OPEN if curr == StatusEnum.CLOSED else StatusEnum.CLOSED)),
+                    ft.Text(t.description, expand=True, color=ft.Colors.GREY_300 if t.status == StatusEnum.CLOSED else ft.Colors.WHITE),
+                    ft.Text(t.responsible.name if t.responsible else "N/A", width=150),
+                    ft.Text(t.status.value, size=10, weight="bold", color=ft.Colors.GREEN_400 if t.status == StatusEnum.CLOSED else ft.Colors.BLUE_400)
+                ]), padding=5, bgcolor=ft.Colors.SURFACE_CONTAINER if t.status == StatusEnum.OPEN else None))
+
 def main(page: ft.Page):
     page.title = "AtaMaster Pro"; page.theme_mode = ft.ThemeMode.DARK; page.padding = 0; page.window_min_width = 1100; page.window_min_height = 750
     init_db()
 
+    # Helper for SnackBar
+    def show_snack(text):
+        snack = ft.SnackBar(ft.Text(text))
+        page.overlay.append(snack)
+        snack.open = True
+        page.update()
+
     # File Pickers
-    def on_backup_result(e: ft.FilePickerResultEvent):
-        if e.path: shutil.copy("atamaster.db", e.path); page.show_snack_bar(ft.SnackBar(ft.Text(f"Backup exportado para {e.path}")))
-    def on_restore_result(e: ft.FilePickerResultEvent):
-        if e.files: shutil.copy(e.files[0].path, "atamaster.db"); page.show_snack_bar(ft.SnackBar(ft.Text("Backup importado com sucesso! Reinicie o aplicativo.")))
-    page.export_picker = ft.FilePicker(on_result=on_backup_result)
-    page.import_picker = ft.FilePicker(on_result=on_restore_result)
+    def on_backup_result(e):
+        if e.path: shutil.copy("atamaster.db", e.path); show_snack(f"Backup exportado para {e.path}")
+    def on_restore_result(e):
+        if e.files: shutil.copy(e.files[0].path, "atamaster.db"); show_snack("Backup importado com sucesso! Reinicie o aplicativo.")
+    page.export_picker = ft.FilePicker(); page.export_picker.on_result = on_backup_result
+    page.import_picker = ft.FilePicker(); page.import_picker.on_result = on_restore_result
     page.overlay.extend([page.export_picker, page.import_picker])
 
     sidebar = Sidebar(page); content_container = ft.Container(expand=True, padding=30, bgcolor=ft.Colors.SURFACE); content_container.content = DashboardView(page)
     def route_change(route):
-        if page.route == "/": content_container.content = DashboardView(page)
-        elif page.route == "/management": content_container.content = ManagementView(page)
-        elif page.route == "/meetings": content_container.content = MeetingsListView(page)
-        elif page.route == "/new_meeting": content_container.content = NewMeetingView(page)
+        troute = ft.TemplateRoute(page.route)
+        if troute.match("/"): content_container.content = DashboardView(page)
+        elif troute.match("/management"): content_container.content = ManagementView(page)
+        elif troute.match("/meetings"): content_container.content = MeetingsListView(page)
+        elif troute.match("/new_meeting"): content_container.content = NewMeetingView(page)
+        elif troute.match("/meeting/:id"): content_container.content = MeetingDetailView(page, troute.id)
         page.update()
     page.on_route_change = route_change
     layout = ft.Row([sidebar, ft.VerticalDivider(width=1, color=ft.Colors.GREY_900), ft.Container(content=content_container, expand=True)], expand=True, spacing=0)
     page.add(layout); page.go(page.route)
 
 if __name__ == "__main__":
-    ft.run(main)
+    ft.app(target=main)
