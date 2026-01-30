@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import shutil
+import tempfile
 import urllib3
 import urllib.parse
 import requests
@@ -570,25 +571,40 @@ class AutomacaoPunchList:
                         if results:
                             df_final = self.tratar_dados(results, colunas_desejadas)
 
-                            # --- LOOP PARA SALVAR EM MÚLTIPLOS DESTINOS ---
-                            for pasta_destino in PASTAS_DESTINO:
-                                caminho_final = os.path.join(pasta_destino, arquivo_saida)
-                                try:
-                                    # Cria pasta se não existir na hora H (garantia extra)
-                                    if not os.path.exists(pasta_destino):
-                                        os.makedirs(pasta_destino)
+                            # --- OTIMIZAÇÃO: Salvar em temp e copiar para destinos ---
+                            temp_file_path = None
+                            try:
+                                with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+                                    temp_file_path = tmp.name
 
-                                    df_final.to_excel(caminho_final, index=False)
-                                    self.registrar_log(f"SUCESSO: Planilha '{nome_lista}' salva em: {caminho_final}")
-                                except PermissionError:
-                                    self.registrar_log(
-                                        f"ERRO DE PERMISSÃO: O arquivo '{arquivo_saida}' está aberto em {pasta_destino}. Feche-o.")
-                                    # Não marcamos ciclo_sucesso = False aqui para permitir que salve nas outras pastas se possível
-                                    # Mas se for crítico, pode descomentar a linha abaixo:
-                                    # ciclo_sucesso = False
-                                except Exception as e_save:
-                                    self.registrar_log(f"ERRO ao salvar arquivo em {pasta_destino}: {e_save}")
-                                    ciclo_sucesso = False
+                                df_final.to_excel(temp_file_path, index=False)
+
+                                for pasta_destino in PASTAS_DESTINO:
+                                    caminho_final = os.path.join(pasta_destino, arquivo_saida)
+                                    try:
+                                        # Cria pasta se não existir na hora H (garantia extra)
+                                        if not os.path.exists(pasta_destino):
+                                            os.makedirs(pasta_destino)
+
+                                        shutil.copy2(temp_file_path, caminho_final)
+                                        self.registrar_log(f"SUCESSO: Planilha '{nome_lista}' salva em: {caminho_final}")
+                                    except PermissionError:
+                                        self.registrar_log(
+                                            f"ERRO DE PERMISSÃO: O arquivo '{arquivo_saida}' está aberto em {pasta_destino}. Feche-o.")
+                                        # Não marcamos ciclo_sucesso = False aqui para permitir que salve nas outras pastas se possível
+                                    except Exception as e_save:
+                                        self.registrar_log(f"ERRO ao salvar arquivo em {pasta_destino}: {e_save}")
+                                        ciclo_sucesso = False
+
+                            except Exception as e_temp:
+                                self.registrar_log(f"ERRO CRÍTICO ao processar arquivo temporário: {e_temp}")
+                                ciclo_sucesso = False
+                            finally:
+                                if temp_file_path and os.path.exists(temp_file_path):
+                                    try:
+                                        os.remove(temp_file_path)
+                                    except Exception as e_del:
+                                        self.registrar_log(f"AVISO: Falha ao remover arquivo temporário {temp_file_path}: {e_del}")
                         else:
                             self.registrar_log(f"AVISO: A lista '{nome_lista}' está vazia.")
                     else:
