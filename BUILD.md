@@ -1,38 +1,33 @@
-# Guia para Criação do Executável (.exe) - AtaMaster Pro
+# Guia de Compilação - AtaMaster Pro
 
-Para transformar o script `atamaster.py` em um arquivo executável para Windows, siga os passos abaixo:
+Este documento descreve como configurar o ambiente e gerar o executável (.exe) para Windows.
 
-## 1. Instalar o PyInstaller e Flet
+## 1. Pré-requisitos
+- Python 3.10 ou superior
+- Pip (gerenciador de pacotes)
 
-Abra o terminal ou prompt de comando e instale as ferramentas necessárias:
+## 2. Instalação de Dependências
+Execute o comando abaixo para instalar todas as bibliotecas necessárias:
 
 ```bash
-pip install pyinstaller flet sqlalchemy reportlab openpyxl
+pip install flet==0.80.4 sqlalchemy aiosqlite reportlab openpyxl pypdf pyinstaller
 ```
 
-## 2. Gerar o Executável
+## 3. Estrutura do Projeto
+- `atamaster.py`: Código fonte principal (UI e Lógica).
+- `atamaster.db`: Banco de dados SQLite (gerado automaticamente na primeira execução).
 
-O Flet possui uma ferramenta integrada que simplifica o uso do PyInstaller. Execute o comando abaixo na pasta do projeto:
+## 4. Geração do Executável (.exe)
+Para criar um arquivo único para Windows, utilize o PyInstaller via Flet:
 
 ```bash
 flet pack atamaster.py --name "AtaMasterPro" --icon "icon.ico"
 ```
 
-*Nota: Se você não tiver um arquivo `icon.ico`, remova o parâmetro `--icon "icon.ico"`.*
+*Nota: Se você não tiver um ícone, pode omitir a flag `--icon`.*
 
-## 3. Localizar o Programa
+## 5. Execução
+Após a compilação, o executável estará disponível na pasta `dist/`.
 
-Após a conclusão, uma pasta chamada `dist` será criada. Dentro dela, você encontrará o arquivo `AtaMasterPro.exe`.
-
-## 4. Distribuição
-
-Para que o programa funcione em outros computadores:
-- Você só precisa enviar o arquivo `.exe` da pasta `dist`.
-- O banco de dados (`atamaster.db`) será criado automaticamente na primeira execução se não existir.
-- Não é necessário que a outra pessoa tenha Python instalado.
-
-## Dicas de Arquitetura
-
-- **Portabilidade:** O programa salva os dados no mesmo local onde o executável está rodando.
-- **Auto-Contido:** Todas as dependências (SQLAlchemy, ReportLab) são embutidas no executável pelo comando `flet pack`.
-- **Compatibilidade:** O código foi ajustado para funcionar com a versão 0.80.4 do Flet, garantindo estabilidade visual.
+---
+Desenvolvido por Daniel Alves Anversi

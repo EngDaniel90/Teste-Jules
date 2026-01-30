@@ -1,45 +1,18 @@
-# AtaMaster Pro - Sistema de Atas de Reunião "Ata Viva"
+# AtaMaster Pro - Business Intelligence Edition
 
-Este programa foi desenvolvido para automatizar a criação de atas de reunião, permitindo o acompanhamento contínuo de tarefas ("Ata Viva"), onde itens abertos de uma reunião são automaticamente transportados para a próxima.
+Sistema profissional para gestão de atas de reunião, acompanhamento de pendências ("Ata Viva") e geração de relatórios executivos.
 
-## Arquitetura do Sistema
+## Principais Funcionalidades
+- **Ata Viva:** Itens pendentes de reuniões anteriores são automaticamente importados para a pauta atual.
+- **Gestão de Prazos:** Alertas visuais automáticos para itens que atingem o terceiro prazo (P3).
+- **Relatórios:** Geração de PDF profissional com lista de presença e assinaturas.
+- **Fusão de Documentos:** Anexe PDFs (apresentações, cronogramas) que serão fundidos automaticamente à ata final.
+- **Dashboard:** Visão geral de itens críticos e total de pendências.
+- **Personalização:** Escolha entre 3 temas visuais (Corporate Cyan, Indigo Night, Green Growth).
 
-O sistema utiliza uma stack tecnológica moderna baseada em Python:
+## Como Instalar e Rodar
+Veja o arquivo [BUILD.md](BUILD.md) para instruções detalhadas sobre instalação de dependências e compilação para Windows.
 
-- **Interface Gráfica (GUI):** [Flet](https://flet.dev) - Framework baseado em Flutter para criar interfaces modernas.
-- **Banco de Dados:** SQLite com SQLAlchemy - Banco de dados local em arquivo único (`atamaster.db`).
-- **Geração de PDF:** ReportLab - Biblioteca profissional para criação de documentos PDF.
-- **ORM:** SQLAlchemy - Para mapeamento objeto-relacional e gerenciamento de banco de dados.
-
-### Estrutura de Arquivos Necessária
-
-Para que o programa funcione e possa ser compilado, a seguinte estrutura deve ser mantida:
-
-- `atamaster.py`: Arquivo principal contendo toda a lógica do programa e interface.
-- `generate_manual.py`: Script auxiliar para gerar o manual do usuário em PDF.
-- `BUILD.md`: Instruções detalhadas para gerar o executável (.exe).
-- `atamaster.db`: (Gerado automaticamente) Arquivo do banco de dados local.
-
-## Como Executar
-
-1. Certifique-se de ter o Python 3.10 ou superior instalado.
-2. Instale as dependências:
-   ```bash
-   pip install flet sqlalchemy reportlab openpyxl
-   ```
-3. Execute o programa:
-   ```bash
-   python atamaster.py
-   ```
-
-## Funcionalidades Principais
-
-- **Grupos de Reunião:** Organize suas atas por contexto (ex: "Engenharia", "Diretoria").
-- **Ata Viva:** Tarefas com status "OPEN" são importadas automaticamente para novas reuniões do mesmo grupo.
-- **Alertas de Prazo:** Sistema visual que destaca tarefas atrasadas, especialmente quando atingem o 3º prazo.
-- **Participantes e Empresas:** Cadastro simplificado e importação em massa via Excel (Col A: Nome, Col B: Email).
-- **Exportação PDF:** Gera atas profissionais com tabelas, status e espaços para assinatura.
-- **Backup/Restore:** Sistema simplificado de segurança dos dados.
-
----
-Desenvolvido por Daniel Alves Anversi
+## Créditos
+Desenvolvido por **Daniel Alves Anversi**.
+Versão: Business Intelligence 2.5
