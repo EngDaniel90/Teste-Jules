@@ -185,7 +185,7 @@ class TaskCard(ft.Container):
     def __init__(self, task, p_name, page):
         super().__init__()
         self.task = task; self.p_name = p_name; self.m_page = page
-        self.padding = 15; self.border_radius = 10; self.bgcolor = ft.Colors.SURFACE_VARIANT
+        self.padding = 15; self.border_radius = 10; self.bgcolor = ft.Colors.SURFACE_CONTAINER
 
         status_color = ft.Colors.GREEN_400 if task['status'] == StatusEnum.CLOSED else ft.Colors.AMBER_400
         is_critical = task['status'] == StatusEnum.OPEN and task['deadline_3'] and task['deadline_3'] < datetime.now()
@@ -240,7 +240,7 @@ class DashboardView(ft.Column):
         self.update()
 
     def stat_card(self, title, value, color):
-        return ft.Container(content=ft.Column([ft.Text(title, size=14, color=ft.Colors.GREY_400), ft.Text(value, size=30, weight="bold", color=color)]), bgcolor=ft.Colors.SURFACE_VARIANT, padding=20, border_radius=10, expand=True)
+        return ft.Container(content=ft.Column([ft.Text(title, size=14, color=ft.Colors.GREY_400), ft.Text(value, size=30, weight="bold", color=color)]), bgcolor=ft.Colors.SURFACE_CONTAINER, padding=20, border_radius=10, expand=True)
 
 class ManagementView(ft.Column):
     def __init__(self, page):
@@ -319,7 +319,7 @@ class NewMeetingView(ft.Column):
         self.deadlines = [None, None, None]
 
         self.title_i = ft.TextField(label="Título da Reunião", value=f"Reunião {datetime.now().strftime('%d/%m/%Y')}")
-        self.group_d = ft.Dropdown(label="Grupo", on_change=self.on_group_select)
+        self.group_d = ft.Dropdown(label="Grupo", on_select=self.on_group_select)
         self.attendance_col = ft.Column()
 
         self.task_desc = ft.TextField(label="Descrição da Tarefa", expand=True)
@@ -467,18 +467,18 @@ class MeetingDetailView(ft.Column):
                 ft.Column([ft.Text(t['description'], weight="bold"), ft.Text(f"Resp: {p['name'] if p else 'N/A'}", size=12)], expand=True),
                 ft.Text(t['status'], color=ft.Colors.CYAN_400 if t['status']==StatusEnum.OPEN else ft.Colors.GREEN_400),
                 actions
-            ]), padding=10, bgcolor=ft.Colors.SURFACE_VARIANT, border_radius=10))
+            ]), padding=10, bgcolor=ft.Colors.SURFACE_CONTAINER, border_radius=10))
         self.update()
     async def close_item(self, t_id): await self.m_page.db.close_task(t_id); await self.refresh()
 
 class Sidebar(ft.Container):
     def __init__(self, page):
         super().__init__(); self.m_page = page
-        self.width = 250; self.bgcolor = ft.Colors.SURFACE_VARIANT; self.padding = 20
+        self.width = 250; self.bgcolor = ft.Colors.SURFACE; self.padding = 20
         self.theme_btn = ft.IconButton(ft.Icons.LIGHT_MODE if page.theme_mode == ft.ThemeMode.DARK else ft.Icons.DARK_MODE, on_click=self.toggle_theme)
         self.color_dropdown = ft.Dropdown(
             label="Cor Primária", value="cyan", options=[ft.dropdown.Option("cyan", "Cyan"), ft.dropdown.Option("indigo", "Indigo"), ft.dropdown.Option("green", "Green")],
-            on_change=self.change_color, text_size=12
+            on_select=self.change_color, text_size=12
         )
         self.content = ft.Column([
             ft.Container(content=ft.Row([ft.Icon(ft.Icons.POLYMER, color=ft.Colors.CYAN_400), ft.Text("ATAMASTER", size=20, weight="bold")]), margin=ft.Margin.only(bottom=40)),
