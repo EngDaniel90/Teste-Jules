@@ -1,0 +1,6 @@
+pyvista
+pyside6
+trimesh
+numpy
+scipy
+meshio
