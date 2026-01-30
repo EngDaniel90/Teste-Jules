@@ -5,6 +5,8 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, F
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 import enum
+import inspect
+import asyncio
 import flet as ft
 try:
     import openpyxl
@@ -77,14 +79,24 @@ def get_session():
     return SessionLocal()
 
 # --- CRUD FUNCTIONS ---
+def to_dict(obj):
+    if not obj: return None
+    d = {c.name: getattr(obj, c.name) for c in obj.__table__.columns}
+    if hasattr(obj, 'responsible') and obj.responsible:
+        d['responsible_name'] = obj.responsible.name
+        d['responsible_company'] = obj.responsible.company
+    if hasattr(obj, 'group') and obj.group:
+        d['group_name'] = obj.group.name
+    return d
+
 def create_group(name, description=None):
     with get_session() as session:
         group = Group(name=name, description=description)
         session.add(group); session.commit(); session.refresh(group)
-        return group
+        return to_dict(group)
 
 def get_groups():
-    with get_session() as session: return session.query(Group).all()
+    with get_session() as session: return [to_dict(g) for g in session.query(Group).all()]
 
 def delete_group(group_id):
     with get_session() as session:
@@ -95,10 +107,10 @@ def create_participant(name, email=None, company=None):
     with get_session() as session:
         p = Participant(name=name, email=email, company=company)
         session.add(p); session.commit(); session.refresh(p)
-        return p
+        return to_dict(p)
 
 def get_participants():
-    with get_session() as session: return session.query(Participant).all()
+    with get_session() as session: return [to_dict(p) for p in session.query(Participant).all()]
 
 def delete_participant(p_id):
     with get_session() as session:
@@ -109,11 +121,11 @@ def create_meeting(group_id, title, date=None, location=None):
     with get_session() as session:
         m = Meeting(group_id=group_id, title=title, date=date or datetime.utcnow(), location=location)
         session.add(m); session.commit(); session.refresh(m)
-        return m
+        return to_dict(m)
 
 def get_meetings_by_group(group_id):
     with get_session() as session:
-        return session.query(Meeting).filter(Meeting.group_id == group_id).order_by(Meeting.date.desc()).all()
+        return [to_dict(m) for m in session.query(Meeting).filter(Meeting.group_id == group_id).order_by(Meeting.date.desc()).all()]
 
 def create_task(meeting_id, description, responsible_id, date1=None, date2=None, date3=None):
     with get_session() as session:
@@ -122,26 +134,26 @@ def create_task(meeting_id, description, responsible_id, date1=None, date2=None,
         m = session.query(Meeting).filter(Meeting.id == meeting_id).first()
         if m: m.tasks.append(task)
         session.commit(); session.refresh(task)
-        return task
+        return to_dict(task)
 
 def get_tasks_by_meeting(meeting_id):
     with get_session() as session:
         m = session.query(Meeting).filter(Meeting.id == meeting_id).first()
         if not m: return []
-        # Accessing m.tasks inside session or before session closes
-        return [t for t in m.tasks]
+        return [to_dict(t) for t in m.tasks]
 
 def update_task_status(task_id, status):
     with get_session() as session:
         task = session.query(Task).filter(Task.id == task_id).first()
         if task: task.status = status; session.commit()
-        return task
+        return to_dict(task)
 
 def get_open_tasks_for_group(group_id):
     with get_session() as session:
-        return session.query(Task).join(meeting_tasks).join(Meeting)\
+        tasks = session.query(Task).join(meeting_tasks).join(Meeting)\
             .filter(Meeting.group_id == group_id)\
             .filter(Task.status == StatusEnum.OPEN).distinct().all()
+        return [to_dict(t) for t in tasks]
 
 def carry_over_tasks(group_id, new_meeting_id):
     with get_session() as session:
@@ -246,20 +258,23 @@ class DashboardView(ft.Column):
     def summary_card(self, title, value, color): return ft.Container(content=ft.Column([ft.Text(title, size=14, color=ft.Colors.GREY_400), ft.Text(value, size=30, weight="bold", color=color)]), bgcolor=ft.Colors.SURFACE_CONTAINER, padding=20, border_radius=10, expand=True)
     def get_critical_tasks(self):
         now = datetime.now()
+        tasks = []
         with get_session() as session:
-            tasks = session.query(Task).filter(Task.status == StatusEnum.OPEN, Task.date3 < now).all()
-            if not tasks: return ft.Text("Nenhum alerta crítico no momento.", color=ft.Colors.GREY_500)
-            task_list = ft.Column(spacing=10)
-            for task in tasks:
-                def close_task(_, tid=task.id):
-                    update_task_status(tid, StatusEnum.CLOSED)
-                    self.m_page.go("/"); self.m_page.update() # Refresh
-                task_list.controls.append(ft.Container(content=ft.Row([
-                    ft.Icon(ft.Icons.WARNING, color=ft.Colors.RED_400),
-                    ft.Column([ft.Text(task.description, weight="bold"), ft.Text(f"Responsável: {task.responsible.name if task.responsible else 'N/A'} • Prazo Final: {task.date3.strftime('%d/%m/%Y') if task.date3 else 'N/A'}", size=12)], expand=True),
-                    ft.FilledButton("Concluir", icon=ft.Icons.CHECK, on_click=close_task)
-                ]), bgcolor=ft.Colors.RED_900, padding=15, border_radius=10))
-            return task_list
+            db_tasks = session.query(Task).filter(Task.status == StatusEnum.OPEN, Task.date3 < now).all()
+            tasks = [to_dict(t) for t in db_tasks]
+
+        if not tasks: return ft.Text("Nenhum alerta crítico no momento.", color=ft.Colors.GREY_500)
+        task_list = ft.Column(spacing=10)
+        for task in tasks:
+            def close_task(_, tid=task["id"]):
+                update_task_status(tid, StatusEnum.CLOSED)
+                self.m_page.go("/"); self.m_page.update() # Refresh
+            task_list.controls.append(ft.Container(content=ft.Row([
+                ft.Icon(ft.Icons.WARNING, color=ft.Colors.RED_400),
+                ft.Column([ft.Text(task["description"], weight="bold"), ft.Text(f"Responsável: {task.get('responsible_name', 'N/A')} • Prazo Final: {task['date3'].strftime('%d/%m/%Y') if task['date3'] else 'N/A'}", size=12)], expand=True),
+                ft.FilledButton("Concluir", icon=ft.Icons.CHECK, on_click=close_task)
+            ]), bgcolor=ft.Colors.RED_900, padding=15, border_radius=10))
+        return task_list
 
 class ManagementView(ft.Column):
     def __init__(self, page):
@@ -285,14 +300,14 @@ class ManagementView(ft.Column):
     def set_tab(self, tab): self.selected_tab = tab; self.refresh()
     def group_tab(self):
         groups = get_groups(); group_list = ft.Column(spacing=10)
-        for g in groups: group_list.controls.append(ft.ListTile(title=ft.Text(g.name), subtitle=ft.Text(g.description or "Sem descrição"), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, gid=g.id: self.del_group(gid))))
+        for g in groups: group_list.controls.append(ft.ListTile(title=ft.Text(g["name"]), subtitle=ft.Text(g["description"] or "Sem descrição"), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, gid=g["id"]: self.del_group(gid))))
         name_input = ft.TextField(label="Nome do Grupo", expand=True); desc_input = ft.TextField(label="Descrição", expand=True)
         def add_g(_):
             if name_input.value: create_group(name_input.value, desc_input.value); name_input.value = ""; desc_input.value = ""; self.refresh()
         return ft.Column([ft.Row([name_input, desc_input, ft.FilledButton("Adicionar Grupo", on_click=add_g)]), ft.Divider(), group_list])
     def participant_tab(self):
         participants = get_participants(); p_list = ft.Column(spacing=10)
-        for p in participants: p_list.controls.append(ft.ListTile(title=ft.Text(p.name), subtitle=ft.Text(f"{p.company or 'N/A'} • {p.email or 'N/A'}"), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, pid=p.id: self.del_participant(pid))))
+        for p in participants: p_list.controls.append(ft.ListTile(title=ft.Text(p["name"]), subtitle=ft.Text(f"{p['company'] or 'N/A'} • {p['email'] or 'N/A'}"), trailing=ft.IconButton(ft.Icons.DELETE, on_click=lambda _, pid=p["id"]: self.del_participant(pid))))
         name_input = ft.TextField(label="Nome", expand=True); email_input = ft.TextField(label="Email", expand=True); company_input = ft.TextField(label="Empresa", expand=True)
         def add_p(_):
             if name_input.value: create_participant(name_input.value, email_input.value, company_input.value); name_input.value = ""; email_input.value = ""; company_input.value = ""; self.refresh()
@@ -345,11 +360,11 @@ class MeetingsListView(ft.Column):
         if not groups: self.controls.append(ft.Text("Nenhum grupo encontrado. Crie um grupo primeiro.", color=ft.Colors.GREY_500))
         else:
             for g in groups:
-                meetings = get_meetings_by_group(g.id)
-                group_tile = ft.ExpansionTile(title=ft.Text(g.name, weight="bold", size=18), subtitle=ft.Text(f"{len(meetings)} reuniões", size=12, color=ft.Colors.GREY_400), leading=ft.Icon(ft.Icons.FOLDER_OPEN, color=ft.Colors.CYAN_400), controls=[])
+                meetings = get_meetings_by_group(g["id"])
+                group_tile = ft.ExpansionTile(title=ft.Text(g["name"], weight="bold", size=18), subtitle=ft.Text(f"{len(meetings)} reuniões", size=12, color=ft.Colors.GREY_400), leading=ft.Icon(ft.Icons.FOLDER_OPEN, color=ft.Colors.CYAN_400), controls=[])
                 if not meetings: group_tile.controls.append(ft.ListTile(title=ft.Text("Nenhuma reunião registrada.", size=12, color=ft.Colors.GREY_500)))
                 else:
-                    for m in meetings: group_tile.controls.append(ft.ListTile(leading=ft.Icon(ft.Icons.EVENT_NOTE, size=20), title=ft.Text(m.title), subtitle=ft.Text(f"{m.date.strftime('%d/%m/%Y')} • {m.location or 'Sem local'}"), trailing=ft.IconButton(ft.Icons.PICTURE_AS_PDF, on_click=lambda _, mid=m.id: self.generate_pdf_click(mid)), on_click=lambda _, mid=m.id: self.view_meeting(mid)))
+                    for m in meetings: group_tile.controls.append(ft.ListTile(leading=ft.Icon(ft.Icons.EVENT_NOTE, size=20), title=ft.Text(m["title"]), subtitle=ft.Text(f"{m['date'].strftime('%d/%m/%Y')} • {m['location'] or 'Sem local'}"), trailing=ft.IconButton(ft.Icons.PICTURE_AS_PDF, on_click=lambda _, mid=m["id"]: self.generate_pdf_click(mid)), on_click=lambda _, mid=m["id"]: self.view_meeting(mid)))
                 self.controls.append(group_tile)
         if not initial: self.update()
     def view_meeting(self, mid): self.m_page.go(f"/meeting/{mid}")
@@ -366,7 +381,7 @@ class TaskEditor(ft.Container):
         super().__init__()
         self.m_page = page; self.on_add_task = on_add_task; self.participants = get_participants()
         self.desc_input = ft.TextField(label="Descrição da Tarefa", multiline=True, expand=True)
-        self.resp_dropdown = ft.Dropdown(label="Responsável", options=[ft.dropdown.Option(str(p.id), p.name) for p in self.participants])
+        self.resp_dropdown = ft.Dropdown(label="Responsável", options=[ft.dropdown.Option(str(p["id"]), p["name"]) for p in self.participants])
         self.date1 = ft.TextField(label="Prazo 1 (DD/MM/YYYY)", width=150); self.date2 = ft.TextField(label="Prazo 2 (DD/MM/YYYY)", width=150); self.date3 = ft.TextField(label="Prazo 3 (DD/MM/YYYY)", width=150)
         self.content = ft.Column([ft.Text("Adicionar Tarefa", weight="bold"), ft.Row([self.desc_input]), ft.Row([self.resp_dropdown, self.date1, self.date2, self.date3]), ft.FilledButton("Adicionar à Lista", on_click=self.add_clicked)])
     def add_clicked(self, _):
@@ -385,14 +400,14 @@ class TaskEditor(ft.Container):
 class NewMeetingView(ft.Column):
     def __init__(self, page):
         super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.tasks_to_add = []; self.groups = get_groups()
-        self.group_sel = ft.Dropdown(label="Selecionar Grupo", options=[ft.dropdown.Option(str(g.id), g.name) for g in self.groups], on_select=self.group_changed)
+        self.group_sel = ft.Dropdown(label="Selecionar Grupo", options=[ft.dropdown.Option(str(g["id"]), g["name"]) for g in self.groups], on_select=self.group_changed)
         self.title_input = ft.TextField(label="Título da Reunião", value="Reunião Semanal"); self.location_input = ft.TextField(label="Local", value="Online")
         self.tasks_list_display = ft.Column(); self.task_editor = TaskEditor(self.add_task_to_list, page)
         self.controls = [ft.Text("Nova Reunião", size=28, weight="bold"), ft.Row([self.group_sel, self.title_input, self.location_input]), ft.Divider(), ft.Text("Pauta (Itens Novos e Importados)", size=18, weight="bold"), self.tasks_list_display, ft.Divider(), self.task_editor, ft.Divider(), ft.FilledButton("Salvar e Gerar Ata", icon=ft.Icons.SAVE, on_click=self.save_meeting)]
     def group_changed(self, _):
         if not self.group_sel.value: return
         gid = int(self.group_sel.value); open_tasks = get_open_tasks_for_group(gid); self.tasks_to_add = []
-        for t in open_tasks: self.tasks_to_add.append({"id": t.id, "description": t.description, "responsible_id": t.responsible_id, "date1": t.date1, "date2": t.date2, "date3": t.date3, "is_new": False})
+        for t in open_tasks: self.tasks_to_add.append({"id": t["id"], "description": t["description"], "responsible_id": t["responsible_id"], "date1": t["date1"], "date2": t["date2"], "date3": t["date3"], "is_new": False})
         self.refresh_tasks_display()
     def add_task_to_list(self, desc, resp_id, d1, d2, d3):
         lines = desc.split("\n"); adjusted_desc = "\n".join([(l if l.strip().startswith("•") else f"• {l}") for l in lines if l.strip()])
@@ -401,7 +416,7 @@ class NewMeetingView(ft.Column):
     def refresh_tasks_display(self):
         self.tasks_list_display.controls.clear()
         for t in self.tasks_to_add:
-            p_name = next((p.name for p in self.task_editor.participants if p.id == t["responsible_id"]), "N/A")
+            p_name = next((p["name"] for p in self.task_editor.participants if p["id"] == t["responsible_id"]), "N/A")
             color = ft.Colors.WHITE
             if t.get("date3") and t["date3"] < datetime.now(): color = ft.Colors.RED_400
             def mark_closed(_, tid=t.get("id")):
@@ -426,28 +441,41 @@ class MeetingDetailView(ft.Column):
     def __init__(self, page, mid):
         super().__init__(expand=True, scroll=ft.ScrollMode.AUTO); self.m_page = page; self.mid = int(mid); self.refresh()
     def refresh(self):
+        m = None
+        tasks = []
         with get_session() as session:
-            m = session.query(Meeting).filter(Meeting.id == self.mid).first()
-            if not m: self.controls = [ft.Text("Reunião não encontrada.")]; return
-            self.controls = [
-                ft.Row([ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda _: self.m_page.go("/meetings")), ft.Text(m.title, size=28, weight="bold")]),
-                ft.Text(f"Grupo: {m.group.name} • Data: {m.date.strftime('%d/%m/%Y')}", color=ft.Colors.GREY_400),
-                ft.Divider(),
-                ft.Text("Tarefas da Reunião", size=18, weight="bold")
-            ]
-            for t in m.tasks:
-                def update_st(tid, status): update_task_status(tid, status); self.refresh(); self.update()
-                status_icon = ft.Icons.CHECK_BOX if t.status == StatusEnum.CLOSED else ft.Icons.CHECK_BOX_OUTLINE_BLANK
-                self.controls.append(ft.Container(content=ft.Row([
-                    ft.IconButton(status_icon, on_click=lambda _, tid=t.id, curr=t.status: update_st(tid, StatusEnum.OPEN if curr == StatusEnum.CLOSED else StatusEnum.CLOSED)),
-                    ft.Text(t.description, expand=True, color=ft.Colors.GREY_300 if t.status == StatusEnum.CLOSED else ft.Colors.WHITE),
-                    ft.Text(t.responsible.name if t.responsible else "N/A", width=150),
-                    ft.Text(t.status.value, size=10, weight="bold", color=ft.Colors.GREEN_400 if t.status == StatusEnum.CLOSED else ft.Colors.BLUE_400)
-                ]), padding=5, bgcolor=ft.Colors.SURFACE_CONTAINER if t.status == StatusEnum.OPEN else None))
+            db_meeting = session.query(Meeting).filter(Meeting.id == self.mid).first()
+            if db_meeting:
+                m = to_dict(db_meeting)
+                tasks = [to_dict(t) for t in db_meeting.tasks]
+
+        if not m: self.controls = [ft.Text("Reunião não encontrada.")]; return
+
+        self.controls = [
+            ft.Row([ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda _: self.m_page.go("/meetings")), ft.Text(m["title"], size=28, weight="bold")]),
+            ft.Text(f"Grupo: {m.get('group_name', 'N/A')} • Data: {m['date'].strftime('%d/%m/%Y')}", color=ft.Colors.GREY_400),
+            ft.Divider(),
+            ft.Text("Tarefas da Reunião", size=18, weight="bold")
+        ]
+        for t in tasks:
+            def update_st(tid, status): update_task_status(tid, status); self.refresh(); self.update()
+            status_icon = ft.Icons.CHECK_BOX if t["status"] == StatusEnum.CLOSED else ft.Icons.CHECK_BOX_OUTLINE_BLANK
+            self.controls.append(ft.Container(content=ft.Row([
+                ft.IconButton(status_icon, on_click=lambda _, tid=t["id"], curr=t["status"]: update_st(tid, StatusEnum.OPEN if curr == StatusEnum.CLOSED else StatusEnum.CLOSED)),
+                ft.Text(t["description"], expand=True, color=ft.Colors.GREY_300 if t["status"] == StatusEnum.CLOSED else ft.Colors.WHITE),
+                ft.Text(t.get("responsible_name", "N/A"), width=150),
+                ft.Text(t["status"].value, size=10, weight="bold", color=ft.Colors.GREEN_400 if t["status"] == StatusEnum.CLOSED else ft.Colors.BLUE_400)
+            ]), padding=5, bgcolor=ft.Colors.SURFACE_CONTAINER if t["status"] == StatusEnum.OPEN else None))
 
 async def main(page: ft.Page):
     page.title = "AtaMaster Pro"; page.theme_mode = ft.ThemeMode.DARK; page.padding = 0; page.window_min_width = 1100; page.window_min_height = 750
     init_db()
+
+    # Helper to await safely
+    async def awa(coro):
+        if coro is None: return None
+        if inspect.isawaitable(coro): return await coro
+        return coro
 
     # Helper for SnackBar
     def show_snack(text):
@@ -472,7 +500,7 @@ async def main(page: ft.Page):
             show_snack(f"Importados {count} participantes de {path}")
             # Refresh management view if active
             if page.route == "/management":
-                await route_change(None)
+                await awa(route_change(None))
         except Exception as ex:
             show_snack(f"Erro ao ler Excel: {ex}")
 
@@ -483,7 +511,7 @@ async def main(page: ft.Page):
     page.overlay.extend([page.backup_export_picker, page.backup_import_picker, page.excel_picker])
 
     async def on_backup_click(_):
-        path = await page.backup_export_picker.save_file(file_name="atamaster_backup.db")
+        path = await awa(page.backup_export_picker.save_file(file_name="atamaster_backup.db"))
         if path:
             try:
                 shutil.copy("atamaster.db", path)
@@ -492,7 +520,7 @@ async def main(page: ft.Page):
                 show_snack(f"Erro ao exportar: {ex}")
 
     async def on_restore_click(_):
-        files = await page.backup_import_picker.pick_files(allowed_extensions=["db"])
+        files = await awa(page.backup_import_picker.pick_files(allowed_extensions=["db"]))
         if files:
             try:
                 shutil.copy(files[0].path, "atamaster.db")
@@ -501,14 +529,14 @@ async def main(page: ft.Page):
                 show_snack(f"Erro ao importar: {ex}")
 
     async def on_excel_click(_):
-        files = await page.excel_picker.pick_files(allowed_extensions=["xlsx", "xls"])
+        files = await awa(page.excel_picker.pick_files(allowed_extensions=["xlsx", "xls"]))
         if files:
             path = files[0].path
             page.last_excel_path = path
-            await import_excel(path)
+            await awa(import_excel(path))
 
     async def on_excel_refresh(_):
-        if page.last_excel_path: await import_excel(page.last_excel_path)
+        if page.last_excel_path: await awa(import_excel(page.last_excel_path))
         else: show_snack("Nenhuma planilha selecionada anteriormente.")
 
     page.on_backup_click = on_backup_click
@@ -527,7 +555,7 @@ async def main(page: ft.Page):
         page.update()
     page.on_route_change = route_change
     layout = ft.Row([sidebar, ft.VerticalDivider(width=1, color=ft.Colors.GREY_900), ft.Container(content=content_container, expand=True)], expand=True, spacing=0)
-    page.add(layout); await page.go(page.route)
+    page.add(layout); page.go(page.route)
 
 if __name__ == "__main__":
     ft.run(main)
