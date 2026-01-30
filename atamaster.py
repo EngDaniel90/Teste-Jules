@@ -3,7 +3,7 @@ import shutil
 import enum
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, Enum, Table
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship, joinedload
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table as RelTable, TableStyle, Paragraph, Spacer
@@ -161,7 +161,10 @@ def db_update_task_status(task_id, new_status_str):
 # ==========================================
 def generate_pdf_report(meeting_id):
     with get_session() as session:
-        meeting = session.query(Meeting).filter(Meeting.id == meeting_id).first()
+        meeting = session.query(Meeting).options(
+            joinedload(Meeting.group),
+            joinedload(Meeting.tasks).joinedload(Task.responsible)
+        ).filter(Meeting.id == meeting_id).first()
         if not meeting: return None
         tasks = meeting.tasks
         
