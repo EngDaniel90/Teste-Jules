@@ -62,7 +62,7 @@ class Meeting(Base):
     date = Column(DateTime, default=datetime.now)
     group_id = Column(Integer, ForeignKey('groups.id'))
     group = relationship("Group", back_populates="meetings")
-    tasks = relationship("Task", secondary=meeting_tasks, back_populates="tasks")
+    tasks = relationship("Task", secondary=meeting_tasks, back_populates="meetings")
 
 class Task(Base):
     __tablename__ = 'tasks'
@@ -185,13 +185,13 @@ class TaskCard(ft.Container):
     def __init__(self, task, p_name, page):
         super().__init__()
         self.task = task; self.p_name = p_name; self.m_page = page
-        self.padding = 15; self.border_radius = 10; self.bgcolor = ft.Colors.SURFACE_CONTAINER
+        self.padding = 15; self.border_radius = 10; self.bgcolor = "surface"
 
-        status_color = ft.Colors.GREEN_400 if task['status'] == StatusEnum.CLOSED else ft.Colors.AMBER_400
+        status_color = "green" if task['status'] == StatusEnum.CLOSED else "orange"
         is_critical = task['status'] == StatusEnum.OPEN and task['deadline_3'] and task['deadline_3'] < datetime.now()
         if is_critical:
-            self.border = ft.Border.all(2, ft.Colors.RED_500)
-            status_color = ft.Colors.RED_400
+            self.border = ft.Border.all(2, "red")
+            status_color = "red"
 
         d1 = task['deadline_1'].strftime('%d/%m') if task['deadline_1'] else "--"
         d2 = task['deadline_2'].strftime('%d/%m') if task['deadline_2'] else "--"
@@ -200,16 +200,16 @@ class TaskCard(ft.Container):
         self.content = ft.Row([
             ft.Column([
                 ft.Text(task['description'], weight="bold", size=16),
-                ft.Text(f"Responsável: {p_name}", size=12, color=ft.Colors.GREY_400),
+                ft.Text(f"Responsável: {p_name}", size=12, color="grey"),
                 ft.Row([
                     self.date_chip(d1, "P1"), self.date_chip(d2, "P2"), self.date_chip(d3, "P3", critical=is_critical)
                 ])
             ], expand=True),
-            ft.Container(content=ft.Text(task['status'], size=10, weight="bold", color=ft.Colors.BLACK), bgcolor=status_color, padding=ft.Padding.symmetric(6, 12), border_radius=15)
+            ft.Container(content=ft.Text(task['status'], size=10, weight="bold", color="black"), bgcolor=status_color, padding=ft.Padding.symmetric(6, 12), border_radius=15)
         ])
 
     def date_chip(self, text, label, critical=False):
-        color = ft.Colors.RED_900 if critical and label == "P3" else ft.Colors.GREY_800
+        color = "#b71c1c" if critical and label == "P3" else "#424242"
         return ft.Container(content=ft.Text(f"{label}: {text}", size=10), bgcolor=color, padding=ft.Padding.symmetric(2, 6), border_radius=4)
 
 class DashboardView(ft.Column):
@@ -223,24 +223,24 @@ class DashboardView(ft.Column):
         self.controls = [
             ft.Container(content=ft.Column([
                 ft.Text("Dashboard", size=28, weight="bold"),
-                ft.Text("Visão geral de tarefas e alertas", color=ft.Colors.GREY_400),
+                ft.Text("Visão geral de tarefas e alertas", color="grey"),
             ]), padding=ft.Padding.only(bottom=20)),
             ft.Row([
-                self.stat_card("Tarefas Críticas", str(len(critical)), ft.Colors.RED_400),
-                self.stat_card("Tarefas em Aberto", str(len(open_tasks)), ft.Colors.CYAN_400),
+                self.stat_card("Tarefas Críticas", str(len(critical)), "red"),
+                self.stat_card("Tarefas em Aberto", str(len(open_tasks)), "cyan"),
             ], spacing=20),
             ft.Divider(height=40),
-            ft.Text("Alertas Críticos (3º Prazo Vencido)", size=20, weight="bold", color=ft.Colors.RED_400),
+            ft.Text("Alertas Críticos (3º Prazo Vencido)", size=20, weight="bold", color="red"),
         ]
         if not critical:
-            self.controls.append(ft.Text("Nenhum item crítico no momento.", color=ft.Colors.GREY_500))
+            self.controls.append(ft.Text("Nenhum item crítico no momento.", color="grey"))
         for t in critical:
             p = await self.m_page.db.get_participant(t['participant_id'])
             self.controls.append(TaskCard(t, p['name'] if p else "N/A", self.m_page))
         self.update()
 
     def stat_card(self, title, value, color):
-        return ft.Container(content=ft.Column([ft.Text(title, size=14, color=ft.Colors.GREY_400), ft.Text(value, size=30, weight="bold", color=color)]), bgcolor=ft.Colors.SURFACE_CONTAINER, padding=20, border_radius=10, expand=True)
+        return ft.Container(content=ft.Column([ft.Text(title, size=14, color="grey"), ft.Text(value, size=30, weight="bold", color=color)]), bgcolor="surface", padding=20, border_radius=10, expand=True)
 
 class ManagementView(ft.Column):
     def __init__(self, page):
@@ -249,17 +249,13 @@ class ManagementView(ft.Column):
     async def refresh(self, initial=False):
         self.controls.clear()
         tabs = ft.Row([
-            ft.TextButton("Grupos", on_click=self.goto_groups, style=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab=="groups" else ft.Colors.WHITE)),
-            ft.TextButton("Participantes", on_click=self.goto_participants, style=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab=="participants" else ft.Colors.WHITE)),
-            ft.TextButton("Backup/Dados", on_click=self.goto_backup, style=ft.ButtonStyle(color=ft.Colors.CYAN_400 if self.selected_tab=="backup" else ft.Colors.WHITE)),
+            ft.TextButton("Grupos", on_click=lambda e: asyncio.create_task(self.set_tab("groups")), style=ft.ButtonStyle(color="cyan" if self.selected_tab=="groups" else "white")),
+            ft.TextButton("Participantes", on_click=lambda e: asyncio.create_task(self.set_tab("participants")), style=ft.ButtonStyle(color="cyan" if self.selected_tab=="participants" else "white")),
+            ft.TextButton("Backup/Dados", on_click=lambda e: asyncio.create_task(self.set_tab("backup")), style=ft.ButtonStyle(color="cyan" if self.selected_tab=="backup" else "white")),
         ])
         content = await self.get_tab_content()
         self.controls = [ft.Text("Gerenciamento", size=28, weight="bold"), tabs, ft.Divider(), content]
         if not initial: self.update()
-
-    async def goto_groups(self, e): await self.set_tab("groups")
-    async def goto_participants(self, e): await self.set_tab("participants")
-    async def goto_backup(self, e): await self.set_tab("backup")
 
     async def set_tab(self, tab): self.selected_tab = tab; await self.refresh()
 
@@ -275,7 +271,7 @@ class ManagementView(ft.Column):
         desc_input = ft.TextField(label="Descrição", expand=True)
         async def add_g(e):
             if name_input.value: await self.m_page.db.add_group(name_input.value, desc_input.value); await self.refresh()
-        return ft.Column([ft.Row([name_input, desc_input, ft.FilledButton("Adicionar Grupo", on_click=add_g)]), ft.Divider(), g_list])
+        return ft.Column([ft.Row([name_input, desc_input, ft.FilledButton("Adicionar Grupo", on_click=lambda e: asyncio.create_task(add_g(e)))]), ft.Divider(), g_list])
 
     async def participant_tab(self):
         ps = await self.m_page.db.get_participants(); gs = await self.m_page.db.get_groups()
@@ -300,15 +296,15 @@ class ManagementView(ft.Column):
                     if row[0]: await self.m_page.db.add_participant(str(row[0]), str(row[1]) if len(row)>1 else "", str(row[2]) if len(row)>2 else "")
                 await self.refresh()
 
-        excel_btn = ft.FilledButton("Importar de Excel (A: Nome, B: Email, C: Empresa)", icon=ft.Icons.UPLOAD_FILE, on_click=import_excel)
-        return ft.Column([ft.Row([name_i, email_i, comp_i, group_dropdown]), ft.FilledButton("Adicionar Participante", on_click=add_p), ft.Divider(), excel_btn, ft.Divider(), p_list])
+        excel_btn = ft.FilledButton("Importar de Excel (A: Nome, B: Email, C: Empresa)", icon=ft.Icons.UPLOAD_FILE, on_click=lambda e: asyncio.create_task(import_excel(e)))
+        return ft.Column([ft.Row([name_i, email_i, comp_i, group_dropdown]), ft.FilledButton("Adicionar Participante", on_click=lambda e: asyncio.create_task(add_p(e))), ft.Divider(), excel_btn, ft.Divider(), p_list])
 
     def backup_tab(self):
         return ft.Container(content=ft.Column([
             ft.Text("Manutenção de Dados"),
             ft.Row([
-                ft.FilledButton("Exportar Banco (.db)", icon=ft.Icons.SAVE, on_click=self.m_page.run_backup),
-                ft.FilledButton("Restaurar Banco (.db)", icon=ft.Icons.RESTORE, on_click=self.m_page.run_restore),
+                ft.FilledButton("Exportar Banco (.db)", icon=ft.Icons.SAVE, on_click=lambda e: asyncio.create_task(self.m_page.run_backup(e))),
+                ft.FilledButton("Restaurar Banco (.db)", icon=ft.Icons.RESTORE, on_click=lambda e: asyncio.create_task(self.m_page.run_restore(e))),
             ])
         ]), padding=20)
 
@@ -319,7 +315,7 @@ class NewMeetingView(ft.Column):
         self.deadlines = [None, None, None]
 
         self.title_i = ft.TextField(label="Título da Reunião", value=f"Reunião {datetime.now().strftime('%d/%m/%Y')}")
-        self.group_d = ft.Dropdown(label="Grupo", on_select=self.on_group_select)
+        self.group_d = ft.Dropdown(label="Grupo", on_select=lambda e: asyncio.create_task(self.on_group_select(e)))
         self.attendance_col = ft.Column()
 
         self.task_desc = ft.TextField(label="Descrição da Tarefa", expand=True)
@@ -331,9 +327,9 @@ class NewMeetingView(ft.Column):
 
         self.tasks_list_display = ft.Column()
 
-    async def open_dp1(self, e): self.m_page.active_dp_idx = 0; await self.m_page.date_picker.pick_date()
-    async def open_dp2(self, e): self.m_page.active_dp_idx = 1; await self.m_page.date_picker.pick_date()
-    async def open_dp3(self, e): self.m_page.active_dp_idx = 2; await self.m_page.date_picker.pick_date()
+    def open_dp1(self, e): self.m_page.active_dp_idx = 0; asyncio.create_task(self.m_page.date_picker.pick_date())
+    def open_dp2(self, e): self.m_page.active_dp_idx = 1; asyncio.create_task(self.m_page.date_picker.pick_date())
+    def open_dp3(self, e): self.m_page.active_dp_idx = 2; asyncio.create_task(self.m_page.date_picker.pick_date())
 
     async def handle_date_change(self, e):
         idx = self.m_page.active_dp_idx
@@ -357,12 +353,12 @@ class NewMeetingView(ft.Column):
             ft.Text("Novas Tarefas", size=18, weight="bold"),
             ft.Row([self.task_desc, self.task_resp]),
             ft.Row([self.d1_btn, self.d2_btn, self.d3_btn]),
-            ft.FilledButton("Adicionar à lista", icon=ft.Icons.ADD, on_click=self.add_task_to_meeting),
+            ft.FilledButton("Adicionar à lista", icon=ft.Icons.ADD, on_click=lambda e: asyncio.create_task(self.add_task_to_meeting(e))),
             ft.Divider(),
             ft.Text("Itens na Pauta", size=18, weight="bold"),
             self.tasks_list_display,
             ft.Divider(),
-            ft.FilledButton("Salvar Ata e Gerar PDF", icon=ft.Icons.SAVE, on_click=self.save_meeting, bgcolor=ft.Colors.GREEN_700, color=ft.Colors.WHITE)
+            ft.FilledButton("Salvar Ata e Gerar PDF", icon=ft.Icons.SAVE, on_click=lambda e: asyncio.create_task(self.save_meeting(e)), bgcolor="green", color="white")
         ]
         self.update()
 
@@ -394,7 +390,7 @@ class NewMeetingView(ft.Column):
         self.tasks_list_display.controls.clear()
         for i, t in enumerate(self.temp_tasks):
             p = await self.m_page.db.get_participant(t['participant_id'])
-            color = ft.Colors.CYAN_200 if t.get("from_db") else ft.Colors.WHITE
+            color = "#80deea" if t.get("from_db") else "white"
             self.tasks_list_display.controls.append(ft.Container(content=ft.Row([
                 ft.Text(t["description"], expand=True, color=color),
                 ft.Text(p['name'] if p else "N/A", width=150),
@@ -409,7 +405,7 @@ class NewMeetingView(ft.Column):
         att_data = {c.data: c.value for c in self.attendance_col.controls}
         m_id = await self.m_page.db.create_meeting(self.title_i.value, int(self.group_d.value), self.temp_tasks, att_data)
         await self.generate_pdf(m_id)
-        self.m_page.push_route("/meetings")
+        await self.m_page.push_route("/meetings")
 
     async def generate_pdf(self, m_id):
         m = await self.m_page.db.get_meeting_details(m_id)
@@ -445,7 +441,7 @@ class MeetingsView(ft.Column):
         for m in ms:
             self.controls.append(ft.ListTile(
                 title=ft.Text(m['title']), subtitle=ft.Text(f"{m['date'].strftime('%d/%m/%Y')} - Grupo: {m['group_name']}"),
-                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT), on_click=lambda _, mid=m['id']: self.m_page.push_route(f"/meeting/{mid}")
+                trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT), on_click=lambda _, mid=m['id']: asyncio.create_task(self.m_page.push_route(f"/meeting/{mid}"))
             ))
         self.update()
 
@@ -456,8 +452,8 @@ class MeetingDetailView(ft.Column):
         m = await self.m_page.db.get_meeting_details(self.m_id)
         if not m: return
         self.controls = [
-            ft.Row([ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda _: self.m_page.push_route("/meetings")), ft.Text(m['title'], size=28, weight="bold")]),
-            ft.Text(f"Data: {m['date'].strftime('%d/%m/%Y')} | Grupo: {m['group_name']}", color=ft.Colors.GREY_400),
+            ft.Row([ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda _: asyncio.create_task(self.m_page.push_route("/meetings"))), ft.Text(m['title'], size=28, weight="bold")]),
+            ft.Text(f"Data: {m['date'].strftime('%d/%m/%Y')} | Grupo: {m['group_name']}", color="grey"),
             ft.Divider(), ft.Text("Itens desta Reunião", size=20, weight="bold"),
         ]
         for t in m['tasks']:
@@ -465,35 +461,35 @@ class MeetingDetailView(ft.Column):
             if t['status'] == StatusEnum.OPEN: actions.controls.append(ft.FilledButton("Fechar Item", on_click=lambda _, tid=t['id']: asyncio.create_task(self.close_item(tid))))
             self.controls.append(ft.Container(content=ft.Row([
                 ft.Column([ft.Text(t['description'], weight="bold"), ft.Text(f"Resp: {p['name'] if p else 'N/A'}", size=12)], expand=True),
-                ft.Text(t['status'], color=ft.Colors.CYAN_400 if t['status']==StatusEnum.OPEN else ft.Colors.GREEN_400),
+                ft.Text(t['status'], color="cyan" if t['status']==StatusEnum.OPEN else "green"),
                 actions
-            ]), padding=10, bgcolor=ft.Colors.SURFACE_CONTAINER, border_radius=10))
+            ]), padding=10, bgcolor="surface", border_radius=10))
         self.update()
     async def close_item(self, t_id): await self.m_page.db.close_task(t_id); await self.refresh()
 
 class Sidebar(ft.Container):
     def __init__(self, page):
         super().__init__(); self.m_page = page
-        self.width = 250; self.bgcolor = ft.Colors.SURFACE; self.padding = 20
+        self.width = 250; self.bgcolor = "#1a1c1e"; self.padding = 20
         self.theme_btn = ft.IconButton(ft.Icons.LIGHT_MODE if page.theme_mode == ft.ThemeMode.DARK else ft.Icons.DARK_MODE, on_click=self.toggle_theme)
         self.color_dropdown = ft.Dropdown(
             label="Cor Primária", value="cyan", options=[ft.dropdown.Option("cyan", "Cyan"), ft.dropdown.Option("indigo", "Indigo"), ft.dropdown.Option("green", "Green")],
             on_select=self.change_color, text_size=12
         )
         self.content = ft.Column([
-            ft.Container(content=ft.Row([ft.Icon(ft.Icons.POLYMER, color=ft.Colors.CYAN_400), ft.Text("ATAMASTER", size=20, weight="bold")]), margin=ft.Margin.only(bottom=40)),
+            ft.Container(content=ft.Row([ft.Icon(ft.Icons.POLYMER, color="cyan"), ft.Text("ATAMASTER", size=20, weight="bold")]), margin=ft.Margin.only(bottom=40)),
             self.nav_item(ft.Icons.DASHBOARD, "Dashboard", "/"),
             self.nav_item(ft.Icons.FOLDER, "Atas de Reunião", "/meetings"),
             self.nav_item(ft.Icons.GROUP, "Gerenciamento", "/management"),
             ft.Divider(),
-            ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=ft.Colors.CYAN_400), ft.Text("Nova Reunião", color=ft.Colors.CYAN_400, weight="bold")]), padding=10, border=ft.Border.all(1, ft.Colors.CYAN_900), border_radius=10, on_click=lambda _: self.m_page.push_route("/new_meeting")),
+            ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color="cyan"), ft.Text("Nova Reunião", color="cyan", weight="bold")]), padding=10, border=ft.Border.all(1, "cyan"), border_radius=10, on_click=lambda _: asyncio.create_task(self.m_page.push_route("/new_meeting"))),
             ft.Divider(),
             ft.Row([ft.Text("Tema", size=12), self.theme_btn], alignment="spaceBetween"),
             self.color_dropdown,
             ft.Container(expand=True),
-            ft.Text("Desenvolvido por Daniel Alves Anversi", size=10, italic=True, color=ft.Colors.GREY_500)
+            ft.Text("Desenvolvido por Daniel Alves Anversi", size=10, italic=True, color="grey")
         ])
-    def nav_item(self, icon, text, route): return ft.Container(content=ft.Row([ft.Icon(icon), ft.Text(text)]), padding=10, border_radius=10, on_click=lambda _, r=route: self.m_page.push_route(r), ink=True)
+    def nav_item(self, icon, text, route): return ft.Container(content=ft.Row([ft.Icon(icon), ft.Text(text)]), padding=10, border_radius=10, on_click=lambda _, r=route: asyncio.create_task(self.m_page.push_route(r)), ink=True)
     def toggle_theme(self, e):
         self.m_page.theme_mode = ft.ThemeMode.LIGHT if self.m_page.theme_mode == ft.ThemeMode.DARK else ft.ThemeMode.DARK
         self.theme_btn.icon = ft.Icons.LIGHT_MODE if self.m_page.theme_mode == ft.ThemeMode.DARK else ft.Icons.DARK_MODE
@@ -518,7 +514,7 @@ async def main(page: ft.Page):
         if res and res.files: shutil.copy(res.files[0].path, "atamaster.db"); await page.db.init_db()
     page.run_restore = run_restore
 
-    sidebar = Sidebar(page); content_container = ft.Container(expand=True, padding=30, bgcolor=ft.Colors.SURFACE)
+    sidebar = Sidebar(page); content_container = ft.Container(expand=True, padding=30, bgcolor="black" if page.theme_mode == ft.ThemeMode.DARK else "white")
     async def route_change(e):
         content_container.content = None; page.update(); route = page.route
         if route == "/": view = DashboardView(page)
@@ -531,8 +527,8 @@ async def main(page: ft.Page):
         if hasattr(view, 'refresh'): await view.refresh()
         page.update()
     page.on_route_change = route_change
-    layout = ft.Row([sidebar, ft.VerticalDivider(width=1, color=ft.Colors.GREY_900), content_container], expand=True, spacing=0)
-    page.add(layout); page.push_route("/")
+    layout = ft.Row([sidebar, ft.VerticalDivider(width=1, color="grey"), content_container], expand=True, spacing=0)
+    page.add(layout); await page.push_route("/")
 
 if __name__ == "__main__":
     ft.run(main)
