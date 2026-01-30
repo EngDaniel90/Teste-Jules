@@ -3,7 +3,7 @@ import shutil
 import enum
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, Enum, Table
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship, joinedload
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Table as RelTable, TableStyle, Paragraph, Spacer
@@ -144,6 +144,7 @@ def db_get_open_tasks(group_id):
     # Retorna tarefas abertas de reuniões anteriores deste grupo
     with get_session() as s:
         return s.query(Task).join(meeting_tasks).join(Meeting)\
+            .options(joinedload(Task.responsible))\
             .filter(Meeting.group_id == group_id)\
             .filter(Task.status != StatusEnum.CLOSED).distinct().all()
 
