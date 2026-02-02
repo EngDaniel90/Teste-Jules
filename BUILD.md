@@ -1,33 +1,24 @@
-# Guia de Compilação - AtaMaster Pro
+# BUILD - AtaMaster Pro v3
 
-Este documento descreve como configurar o ambiente e gerar o executável (.exe) para Windows.
+Este documento explica como gerar o executável (.exe) para Windows.
 
-## 1. Pré-requisitos
-- Python 3.10 ou superior
-- Pip (gerenciador de pacotes)
-
-## 2. Instalação de Dependências
-Execute o comando abaixo para instalar todas as bibliotecas necessárias:
-
+## Dependências
+Instale as bibliotecas necessárias:
 ```bash
-pip install flet==0.80.4 sqlalchemy aiosqlite reportlab openpyxl pypdf pyinstaller
+pip install flet sqlalchemy reportlab pypdf openpyxl pyinstaller
 ```
 
-## 3. Estrutura do Projeto
-- `atamaster.py`: Código fonte principal (UI e Lógica).
-- `atamaster.db`: Banco de dados SQLite (gerado automaticamente na primeira execução).
-
-## 4. Geração do Executável (.exe)
-Para criar um arquivo único para Windows, utilize o PyInstaller via Flet:
-
+## Geração do Executável
+Utilize o comando abaixo:
 ```bash
-flet pack atamaster.py --name "AtaMasterPro" --icon "icon.ico"
+flet pack atamaster.py --name "AtaMasterPro" --icon "app_icon.ico"
 ```
 
-*Nota: Se você não tiver um ícone, pode omitir a flag `--icon`.*
+## Arquitetura
+- **Persistência**: SQLite (atamaster_pro.db)
+- **Interface**: Flet (Material 3)
+- **Relatórios**: ReportLab + PyPDF (Fusion Engine)
+- **Lógica**: Ata Viva (Task persistence between meetings)
 
-## 5. Execução
-Após a compilação, o executável estará disponível na pasta `dist/`.
-
----
-Desenvolvido por Daniel Alves Anversi
+## Desenvolvedor
+Daniel Alves Anversi
