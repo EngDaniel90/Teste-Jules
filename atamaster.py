@@ -475,7 +475,7 @@ class MeetingDetailView(ft.Column):
 class Sidebar(ft.Container):
     def __init__(self, page):
         super().__init__(); self.m_page = page; self.width = 280; self.bgcolor = "#121212"; self.padding = 20
-        self.nav_col = ft.Column(spacing=5); self.content = ft.Column([ft.Container(content=ft.Row([ft.Icon(ft.Icons.DOMAIN, color=self.m_page.theme_color, size=30), ft.Text("ATAMASTER", size=24, weight=ft.FontWeight.BOLD, color="white")]), margin=ft.margin.only(bottom=40, top=10)), self.nav_col, ft.Divider(height=40, color="#333333"), ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=self.m_page.theme_color), ft.Text("NOVA REUNIÃO", color=self.m_page.theme_color, weight=ft.FontWeight.BOLD)]), padding=15, border=ft.Border.all(1, self.m_page.theme_color), border_radius=12, on_click=lambda _: self.m_page.run_task(self.m_page.push_route, "/new_meeting"), ink=True), ft.Container(expand=True), ft.Text("Business Intelligence 2.5", size=10, color="#444444"), ft.Text("Daniel Alves Anversi", size=11, italic=True, color="grey")], spacing=10); self.update_nav()
+        self.nav_col = ft.Column(spacing=5); self.content = ft.Column([ft.Container(content=ft.Row([ft.Icon(ft.Icons.DOMAIN, color=self.m_page.theme_color, size=30), ft.Text("ATAMASTER", size=24, weight=ft.FontWeight.BOLD, color="white")]), margin=ft.Margin(0, 10, 0, 40)), self.nav_col, ft.Divider(height=40, color="#333333"), ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=self.m_page.theme_color), ft.Text("NOVA REUNIÃO", color=self.m_page.theme_color, weight=ft.FontWeight.BOLD)]), padding=15, border=ft.Border.all(1, self.m_page.theme_color), border_radius=12, on_click=lambda _: self.m_page.run_task(self.m_page.push_route, "/new_meeting"), ink=True), ft.Container(expand=True), ft.Text("Business Intelligence 2.5", size=10, color="#444444"), ft.Text("Daniel Alves Anversi", size=11, italic=True, color="grey")], spacing=10); self.update_nav()
     def update_nav(self): self.nav_col.controls = [self.nav_item(ft.Icons.DASHBOARD_ROUNDED, "Dashboard", "/"), self.nav_item(ft.Icons.DESCRIPTION_ROUNDED, "Histórico", "/meetings"), self.nav_item(ft.Icons.SETTINGS_SUGGEST_ROUNDED, "Gestão", "/management")]
     def nav_item(self, icon, text, route):
         is_active = self.m_page.route == route
@@ -487,7 +487,7 @@ async def main(page: ft.Page):
         return asyncio.create_task(coro(*args, **kwargs))
     page.run_task = run_task
     async def push_route(route):
-        page.go(route)
+        page.push_route(route)
     page.push_route = push_route
     page.db = DBManager(); await page.db.init_db()
     page.theme_color = await page.db.get_setting("theme_color", "cyan")
