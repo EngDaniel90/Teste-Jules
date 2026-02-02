@@ -71,7 +71,7 @@ class Meeting(Base):
     group_id = Column(Integer, ForeignKey('groups.id'))
     attachment_path = Column(String, nullable=True)
     group_rel = relationship("Group", back_populates="meetings")
-    tasks_rel = relationship("Task", secondary=meeting_tasks, back_populates="tasks_rel")
+    tasks_rel = relationship("Task", secondary=meeting_tasks, back_populates="meetings_rel")
 
 class Task(Base):
     __tablename__ = 'tasks'
@@ -376,7 +376,7 @@ class NewMeetingView(ft.Column):
         if res and res.files:
             for f in res.files: self.attachments.append(f.path); self.attachment_display.controls.append(ft.Chip(label=ft.Text(os.path.basename(f.path)), on_delete=lambda _, p=f.path: self.remove_attach(p)))
             self.update()
-    def remove_attach(self, path): self.attachments.remove(path); self.attachment_display.controls = [c for c in self.attachment_display.controls if getattr(c.label, "value", "") == os.path.basename(path)]; self.update()
+    def remove_attach(self, path): self.attachments.remove(path); self.attachment_display.controls = [c for c in self.attachment_display.controls if getattr(c.label, "value", "") != os.path.basename(path)]; self.update()
     async def on_group_select(self, e):
         if not self.group_d.value: return
         g_id = int(self.group_d.value); gps = await self.m_page.db.get_group_participants(g_id)
@@ -413,11 +413,23 @@ class NewMeetingView(ft.Column):
         doc = SimpleDocTemplate(filename, pagesize=A4); styles = getSampleStyleSheet()
         gs = await self.m_page.db.get_groups(); g_name = next((g['name'] for g in gs if g['id'] == group_id), "N/A")
         elements = [Paragraph(f"ATA DE REUNIÃO: {title}", styles['Title']), Paragraph(f"Data: {datetime.now().strftime('%d/%m/%Y')} | Grupo: {g_name}", styles['Normal']), Spacer(1, 24)]
+
         elements.append(Paragraph("LISTA DE PRESENÇA", styles['Heading2']))
-        att_rows = [["Nome", "Presença"]]; [att_rows.append([(await self.m_page.db.get_participant(p_id))['name'], "Sim" if present else "Não"]) for p_id, present in att_data.items()]
+        att_rows = [["Nome", "Presença"]]
+        for p_id, present in att_data.items():
+            p = await self.m_page.db.get_participant(p_id)
+            att_rows.append([p['name'], "Sim" if present else "Não"])
+
         elements.append(RLTable(att_rows, style=TableStyle([('BACKGROUND',(0,0),(-1,0),rl_colors.cyan),('TEXTCOLOR',(0,0),(-1,0),rl_colors.whitesmoke)]))); elements.append(Spacer(1, 24))
+
         elements.append(Paragraph("ACOMPANHAMENTO DE TAREFAS", styles['Heading2']))
-        task_rows = [["Descrição", "Responsável", "Prazo 3", "Status"]]; [task_rows.append([t['description'], (await self.m_page.db.get_participant(t['participant_id']))['name'], t['deadline_3'].strftime('%d/%m/%Y') if t['deadline_3'] else "--", t.get('status', 'OPEN')]) for t in tasks]
+        task_rows = [["Descrição", "Responsável", "Prazo 3", "Status"]]
+        for t in tasks:
+            p = await self.m_page.db.get_participant(t['participant_id'])
+            p_name = p['name'] if p else "N/A"
+            d3 = t['deadline_3'].strftime('%d/%m/%Y') if t['deadline_3'] else "--"
+            task_rows.append([t['description'], p_name, d3, t.get('status', 'OPEN')])
+
         elements.append(RLTable(task_rows, style=TableStyle([('GRID', (0,0), (-1,-1), 0.5, rl_colors.grey)]))); elements.append(Spacer(1, 48))
         elements.append(Paragraph("ASSINATURAS:", styles['Heading2']))
         for p_id, present in att_data.items():
@@ -434,7 +446,8 @@ class MeetingsView(ft.Column):
         self.controls = [ft.Text("Histórico Executivo", size=32, weight=ft.FontWeight.BOLD, color="white"), ft.Row([self.search_field])]
         theme_color = self.m_page.theme_color
         for m in ms:
-            self.controls.append(ft.Container(content=ft.ListTile(title=ft.Text(m['title'], weight=ft.FontWeight.BOLD, color="white"), subtitle=ft.Text(f"{m['date'].strftime('%d/%m/%Y')} • {m['group_name']}", color="grey"), trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, color=theme_color), on_click=lambda _, mid=m['id']: self.m_page.run_task(self.m_page.push_route, f"/meeting/{mid}")), bgcolor="#262626", border_radius=10))
+            meeting_id = m['id']
+            self.controls.append(ft.Container(content=ft.ListTile(title=ft.Text(m['title'], weight=ft.FontWeight.BOLD, color="white"), subtitle=ft.Text(f"{m['date'].strftime('%d/%m/%Y')} • {m['group_name']}", color="grey"), trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, color=theme_color), on_click=lambda _, mid=meeting_id: self.m_page.run_task(self.m_page.push_route, f"/meeting/{mid}")), bgcolor="#262626", border_radius=10))
         self.update()
 
 class MeetingDetailView(ft.Column):
