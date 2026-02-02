@@ -14,6 +14,7 @@ from reportlab.lib import colors as rl_colors
 import openpyxl
 from pypdf import PdfWriter
 
+# --- DATABASE MODELS ---
 Base = declarative_base()
 
 # Junction Tables
@@ -71,7 +72,7 @@ class Meeting(Base):
     group_id = Column(Integer, ForeignKey('groups.id'))
     attachment_path = Column(String, nullable=True)
     group_rel = relationship("Group", back_populates="meetings")
-    tasks_rel = relationship("Task", secondary=meeting_tasks, back_populates="meetings_rel")
+    tasks = relationship("Task", secondary=meeting_tasks, back_populates="meetings")
 
 class Task(Base):
     __tablename__ = 'tasks'
@@ -83,7 +84,7 @@ class Task(Base):
     deadline_2 = Column(DateTime, nullable=True)
     deadline_3 = Column(DateTime, nullable=True)
     responsible = relationship("Participant", back_populates="tasks_assigned")
-    meetings_rel = relationship("Meeting", secondary=meeting_tasks, back_populates="tasks_rel")
+    meetings = relationship("Meeting", secondary=meeting_tasks, back_populates="tasks")
 
 class DBManager:
     def __init__(self, db_url="sqlite+aiosqlite:///atamaster.db"):
@@ -156,7 +157,7 @@ class DBManager:
                         deadline_3=t_info.get("deadline_3")
                     )
                     session.add(task); await session.flush()
-                meeting.tasks_rel.append(task)
+                meeting.tasks.append(task)
             for p_id, present in attendance_data.items():
                 await session.execute(attendance.insert().values(meeting_id=meeting.id, participant_id=p_id, present=present))
             await session.commit(); return meeting.id
@@ -170,12 +171,12 @@ class DBManager:
 
     async def get_meeting_details(self, m_id):
         async with self.async_session() as session:
-            res = await session.execute(select(Meeting).options(selectinload(Meeting.group_rel), selectinload(Meeting.tasks_rel)).filter(Meeting.id == m_id))
+            res = await session.execute(select(Meeting).options(selectinload(Meeting.group_rel), selectinload(Meeting.tasks)).filter(Meeting.id == m_id))
             m = res.scalars().first()
             if not m: return None
             att_res = await session.execute(select(attendance).filter(attendance.c.meeting_id == m_id))
             att = {r.participant_id: r.present for r in att_res.all()}
-            tasks = [self.to_dict(t) for t in m.tasks_rel]
+            tasks = [self.to_dict(t) for t in m.tasks]
             return {**self.to_dict(m), "group_name": m.group_rel.name if m.group_rel else "N/A", "tasks": tasks, "attendance": att}
 
     async def close_task(self, t_id):
@@ -228,7 +229,7 @@ class TaskCard(ft.Container):
     def __init__(self, task, p_name, page):
         super().__init__()
         self.task = task; self.p_name = p_name; self.m_page = page
-        self.padding = 15; self.border_radius = 12; self.bgcolor = "#2c2e33"
+        self.padding = ft.Padding(left=15, top=15, right=15, bottom=15); self.border_radius = 12; self.bgcolor = "#2c2e33"
         status_color = "green" if task['status'] == StatusEnum.CLOSED else "orange"
         is_critical = task['status'] == StatusEnum.OPEN and task['deadline_3'] and task['deadline_3'] < datetime.now()
         if is_critical: self.border = ft.Border.all(2, "red"); status_color = "red"
@@ -237,11 +238,11 @@ class TaskCard(ft.Container):
         d3 = task['deadline_3'].strftime('%d/%m') if task['deadline_3'] else "--"
         self.content = ft.Row([
             ft.Column([ft.Text(task['description'], weight=ft.FontWeight.BOLD, size=16, color="white"), ft.Text(f"Responsável: {p_name}", size=12, color="grey"), ft.Row([self.date_chip(d1, "P1"), self.date_chip(d2, "P2"), self.date_chip(d3, "P3", critical=is_critical)])], expand=True),
-            ft.Container(content=ft.Text(task['status'], size=10, weight=ft.FontWeight.BOLD, color="black"), bgcolor=status_color, padding=ft.Padding.symmetric(6, 12), border_radius=15)
+            ft.Container(content=ft.Text(task['status'], size=10, weight=ft.FontWeight.BOLD, color="black"), bgcolor=status_color, padding=ft.Padding(left=12, top=6, right=12, bottom=6), border_radius=15)
         ])
     def date_chip(self, text, label, critical=False):
         color = "#b71c1c" if critical and label == "P3" else "#424242"
-        return ft.Container(content=ft.Text(f"{label}: {text}", size=10, color="white"), bgcolor=color, padding=ft.Padding.symmetric(2, 6), border_radius=4)
+        return ft.Container(content=ft.Text(f"{label}: {text}", size=10, color="white"), bgcolor=color, padding=ft.Padding(left=6, top=2, right=6, bottom=2), border_radius=4)
 
 class DashboardView(ft.Column):
     def __init__(self, page):
@@ -258,7 +259,7 @@ class DashboardView(ft.Column):
                 ft.Divider(height=20, color="transparent"),
                 ft.Row([ft.Text("Pendências de Alta Prioridade", size=22, weight=ft.FontWeight.BOLD, color="white", expand=True), ft.FilledButton("Relatório Global de Gestão", icon=ft.Icons.FILE_DOWNLOAD, on_click=lambda e: self.m_page.run_task(self.export_excel_report))]),
             ]
-            if not critical: self.controls.append(ft.Container(content=ft.Text("Excelente! Nenhuma pendência crítica hoje.", color="grey"), padding=20, border_radius=10, border=ft.Border.all(1, "#333333")))
+            if not critical: self.controls.append(ft.Container(content=ft.Text("Excelente! Nenhuma pendência crítica hoje.", color="grey"), padding=ft.Padding(left=20, top=20, right=20, bottom=20), border_radius=10, border=ft.Border.all(1, "#333333")))
             for t in critical:
                 p = await self.m_page.db.get_participant(t['participant_id'])
                 self.controls.append(TaskCard(t, p['name'] if p else "N/A", self.m_page))
@@ -274,7 +275,7 @@ class DashboardView(ft.Column):
             self.m_page.snack_bar = ProfessionalSnackBar("Excel exportado com sucesso!"); self.m_page.snack_bar.open = True; self.m_page.update()
         except Exception as ex: self.m_page.snack_bar = ProfessionalSnackBar(f"Erro: {ex}", False); self.m_page.snack_bar.open = True; self.m_page.update()
     def stat_card(self, title, value, color, icon):
-        return ft.Container(content=ft.Column([ft.Row([ft.Icon(icon, color=color, size=20), ft.Text(title, size=12, color="grey", weight=ft.FontWeight.BOLD)]), ft.Text(value, size=40, weight=ft.FontWeight.BOLD, color="white")], spacing=5), bgcolor="#1e1e1e", padding=25, border_radius=15, expand=True, border=ft.Border.all(1, "#333333"))
+        return ft.Container(content=ft.Column([ft.Row([ft.Icon(icon, color=color, size=20), ft.Text(title, size=12, color="grey", weight=ft.FontWeight.BOLD)]), ft.Text(value, size=40, weight=ft.FontWeight.BOLD, color="white")], spacing=5), bgcolor="#1e1e1e", padding=ft.Padding(left=25, top=25, right=25, bottom=25), border_radius=15, expand=True, border=ft.Border.all(1, "#333333"))
 
 class ManagementView(ft.Column):
     def __init__(self, page):
@@ -282,9 +283,9 @@ class ManagementView(ft.Column):
     async def refresh(self, initial=False):
         if not self.page and not initial: return
         self.controls.clear()
-        tabs = ft.Container(content=ft.Row([self.tab_btn("Grupos", "groups"), self.tab_btn("Participantes", "participants"), self.tab_btn("Config", "config"), self.tab_btn("Ajuda", "help")], spacing=10), padding=ft.Padding.only(bottom=20))
+        tabs = ft.Container(content=ft.Row([self.tab_btn("Grupos", "groups"), self.tab_btn("Participantes", "participants"), self.tab_btn("Config", "config"), self.tab_btn("Ajuda", "help")], spacing=10), padding=ft.Padding(left=0, top=0, right=0, bottom=20))
         content = await self.get_tab_content()
-        self.controls = [ft.Text("Administração do Sistema", size=32, weight=ft.FontWeight.BOLD, color="white"), tabs, ft.Container(content=content, padding=10)]
+        self.controls = [ft.Text("Administração do Sistema", size=32, weight=ft.FontWeight.BOLD, color="white"), tabs, ft.Container(content=content, padding=ft.Padding(left=10, top=10, right=10, bottom=10))]
         if not initial: self.update()
     def tab_btn(self, text, key):
         active = self.selected_tab == key
@@ -333,7 +334,7 @@ class ManagementView(ft.Column):
             self.m_page.theme.color_scheme_seed = color_d.value
             self.m_page.snack_bar = ProfessionalSnackBar("Configurações salvas!"); self.m_page.snack_bar.open = True; self.m_page.update()
 
-        backup_card = ft.Container(content=ft.Column([ft.Text("Manutenção Preventiva", size=18, weight=ft.FontWeight.BOLD, color="white"), ft.Text("Crie cópias de segurança para garantir a integridade dos dados.", color="grey"), ft.Row([ft.FilledButton("Exportar Banco", icon=ft.Icons.SAVE, on_click=lambda e: self.m_page.run_task(self.m_page.run_backup, e)), ft.FilledButton("Restaurar Backup", icon=ft.Icons.RESTORE, on_click=lambda e: self.m_page.run_task(self.m_page.run_restore, e))], spacing=20)]), padding=20, bgcolor="#1a1a1a", border_radius=10)
+        backup_card = ft.Container(content=ft.Column([ft.Text("Manutenção Preventiva", size=18, weight=ft.FontWeight.BOLD, color="white"), ft.Text("Crie cópias de segurança para garantir a integridade dos dados.", color="grey"), ft.Row([ft.FilledButton("Exportar Banco", icon=ft.Icons.SAVE, on_click=lambda e: self.m_page.run_task(self.m_page.run_backup, e)), ft.FilledButton("Restaurar Backup", icon=ft.Icons.RESTORE, on_click=lambda e: self.m_page.run_task(self.m_page.run_restore, e))], spacing=20)]), padding=ft.Padding(left=20, top=20, right=20, bottom=20), bgcolor="#1a1a1a", border_radius=10)
 
         return ft.Column([ft.Row([color_d, ft.FilledButton("Salvar", on_click=lambda e: self.m_page.run_task(save_config, e))]), ft.Divider(height=30), backup_card])
 
@@ -347,7 +348,7 @@ class ManagementView(ft.Column):
             ft.Text("5. Documentos: Você pode anexar outros PDFs que serão fundidos à ata final.", color="white"),
             ft.Divider(),
             ft.Text("Suporte: Daniel Alves Anversi", italic=True, color="grey")
-        ], spacing=10, scroll=ft.ScrollMode.AUTO), padding=20)
+        ], spacing=10, scroll=ft.ScrollMode.AUTO), padding=ft.Padding(left=20, top=20, right=20, bottom=20))
 
 class NewMeetingView(ft.Column):
     def __init__(self, page):
@@ -374,9 +375,12 @@ class NewMeetingView(ft.Column):
     async def pick_attachments(self, e):
         res = await self.m_page.attach_picker.pick_files(allow_multiple=True, allowed_extensions=["pdf"])
         if res and res.files:
-            for f in res.files: self.attachments.append(f.path); self.attachment_display.controls.append(ft.Chip(label=ft.Text(os.path.basename(f.path)), on_delete=lambda _, p=f.path: self.remove_attach(p)))
+            for f in res.files: self.attachments.append(f.path); self.attachment_display.controls.append(ft.Chip(label=ft.Text(os.path.basename(f.path)), on_delete=lambda _, p=f.path: self.m_page.run_task(self.remove_attach, p)))
             self.update()
-    def remove_attach(self, path): self.attachments.remove(path); self.attachment_display.controls = [c for c in self.attachment_display.controls if getattr(c.label, "value", "") != os.path.basename(path)]; self.update()
+    async def remove_attach(self, path):
+        if path in self.attachments: self.attachments.remove(path)
+        self.attachment_display.controls = [c for c in self.attachment_display.controls if getattr(c.label, "value", "") != os.path.basename(path)]
+        self.update()
     async def on_group_select(self, e):
         if not self.group_d.value: return
         g_id = int(self.group_d.value); gps = await self.m_page.db.get_group_participants(g_id)
@@ -392,7 +396,7 @@ class NewMeetingView(ft.Column):
         theme_color = self.m_page.theme_color
         for i, t in enumerate(self.temp_tasks):
             p = await self.m_page.db.get_participant(t['participant_id']); p_name = p['name'] if p else "N/A"
-            self.tasks_list_display.controls.append(ft.Container(content=ft.Row([ft.Icon(ft.Icons.HISTORY if t.get("from_db") else ft.Icons.ADD_CIRCLE, color=theme_color if t.get("from_db") else "white"), ft.Text(t["description"], expand=True, color="white"), ft.Text(p_name, width=150, color="grey", size=12), ft.IconButton(ft.Icons.DELETE_OUTLINE, icon_color="red", on_click=lambda _, idx=i: self.m_page.run_task(self.remove_task, idx))]), padding=10, bgcolor="#262626", border_radius=8))
+            self.tasks_list_display.controls.append(ft.Container(content=ft.Row([ft.Icon(ft.Icons.HISTORY if t.get("from_db") else ft.Icons.ADD_CIRCLE, color=theme_color if t.get("from_db") else "white"), ft.Text(t["description"], expand=True, color="white"), ft.Text(p_name, width=150, color="grey", size=12), ft.IconButton(ft.Icons.DELETE_OUTLINE, icon_color="red", on_click=lambda _, idx=i: self.m_page.run_task(self.remove_task, idx))]), padding=ft.Padding(left=10, top=10, right=10, bottom=10), bgcolor="#262626", border_radius=8))
         self.update()
     async def remove_task(self, idx): self.temp_tasks.pop(idx); await self.refresh_tasks()
     async def save_meeting(self, e):
@@ -408,7 +412,7 @@ class NewMeetingView(ft.Column):
             if os.path.exists(ata_temp): os.remove(ata_temp)
         except Exception as ex: final_fn = ata_temp
         await self.m_page.db.create_meeting(self.title_i.value, int(self.group_d.value), self.temp_tasks, att_data, attachment_path=final_fn)
-        os.startfile(final_fn) if os.name == 'nt' else None; await self.m_page.push_route("/meetings")
+        os.startfile(final_fn) if os.name == 'nt' else None; await self.m_page.push_route_async("/meetings")
     async def generate_ata_pdf(self, filename, title, group_id, tasks, att_data):
         doc = SimpleDocTemplate(filename, pagesize=A4); styles = getSampleStyleSheet()
         gs = await self.m_page.db.get_groups(); g_name = next((g['name'] for g in gs if g['id'] == group_id), "N/A")
@@ -447,7 +451,7 @@ class MeetingsView(ft.Column):
         theme_color = self.m_page.theme_color
         for m in ms:
             meeting_id = m['id']
-            self.controls.append(ft.Container(content=ft.ListTile(title=ft.Text(m['title'], weight=ft.FontWeight.BOLD, color="white"), subtitle=ft.Text(f"{m['date'].strftime('%d/%m/%Y')} • {m['group_name']}", color="grey"), trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, color=theme_color), on_click=lambda _, mid=meeting_id: self.m_page.run_task(self.m_page.push_route, f"/meeting/{mid}")), bgcolor="#262626", border_radius=10))
+            self.controls.append(ft.Container(content=ft.ListTile(title=ft.Text(m['title'], weight=ft.FontWeight.BOLD, color="white"), subtitle=ft.Text(f"{m['date'].strftime('%d/%m/%Y')} • {m['group_name']}", color="grey"), trailing=ft.Icon(ft.Icons.CHEVRON_RIGHT, color=theme_color), on_click=lambda _, mid=meeting_id: self.m_page.run_task(self.m_page.push_route_async, f"/meeting/{mid}")), bgcolor="#262626", border_radius=10))
         self.update()
 
 class MeetingDetailView(ft.Column):
@@ -457,12 +461,12 @@ class MeetingDetailView(ft.Column):
         if not self.page: return
         m = await self.m_page.db.get_meeting_details(self.m_id)
         if not m: return
-        self.controls = [ft.Row([ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda _: self.m_page.run_task(self.m_page.push_route, "/meetings")), ft.Text(m['title'], size=28, weight=ft.FontWeight.BOLD, color="white")]), ft.Text(f"{m['date'].strftime('%d/%m/%Y')} | {m['group_name']}", color="grey"), ft.Row([ft.FilledButton("Ver Documento", icon=ft.Icons.PICTURE_AS_PDF, on_click=lambda _: os.startfile(m['attachment_path']) if m['attachment_path'] and os.name=='nt' else None)]), ft.Divider(color="#333333"), ft.Text("Itens de Acompanhamento", size=20, weight=ft.FontWeight.BOLD, color="white")]
+        self.controls = [ft.Row([ft.IconButton(ft.Icons.ARROW_BACK, on_click=lambda _: self.m_page.run_task(self.m_page.push_route_async, "/meetings")), ft.Text(m['title'], size=28, weight=ft.FontWeight.BOLD, color="white")]), ft.Text(f"{m['date'].strftime('%d/%m/%Y')} | {m['group_name']}", color="grey"), ft.Row([ft.FilledButton("Ver Documento", icon=ft.Icons.PICTURE_AS_PDF, on_click=lambda _: os.startfile(m['attachment_path']) if m['attachment_path'] and os.name=='nt' else None)]), ft.Divider(color="#333333"), ft.Text("Itens de Acompanhamento", size=20, weight=ft.FontWeight.BOLD, color="white")]
         theme_color = self.m_page.theme_color
         for t in m['tasks']:
             p = await self.m_page.db.get_participant(t['participant_id']); actions = ft.Row()
             if t['status'] == StatusEnum.OPEN: actions.controls.extend([ft.IconButton(ft.Icons.EDIT, icon_color=theme_color, on_click=lambda _, tid=t['id'], desc=t['description']: self.show_edit_dialog(tid, desc)), ft.FilledButton("Concluir", on_click=lambda _, tid=t['id']: self.m_page.run_task(self.close_item, tid), bgcolor="green")])
-            self.controls.append(ft.Container(content=ft.Row([ft.Column([ft.Text(t['description'], weight=ft.FontWeight.BOLD, color="white"), ft.Text(f"Responsável: {p['name'] if p else 'N/A'}", size=12, color="grey")], expand=True), ft.Text(t['status'], color=theme_color if t['status']==StatusEnum.OPEN else "green", weight=ft.FontWeight.BOLD), actions]), padding=15, bgcolor="#262626", border_radius=12))
+            self.controls.append(ft.Container(content=ft.Row([ft.Column([ft.Text(t['description'], weight=ft.FontWeight.BOLD, color="white"), ft.Text(f"Responsável: {p['name'] if p else 'N/A'}", size=12, color="grey")], expand=True), ft.Text(t['status'], color=theme_color if t['status']==StatusEnum.OPEN else "green", weight=ft.FontWeight.BOLD), actions]), padding=ft.Padding(left=15, top=15, right=15, bottom=15), bgcolor="#262626", border_radius=12))
         self.update()
     def show_edit_dialog(self, t_id, old_desc):
         ei = ft.TextField(value=old_desc, expand=True)
@@ -474,35 +478,79 @@ class MeetingDetailView(ft.Column):
 
 class Sidebar(ft.Container):
     def __init__(self, page):
-        super().__init__(); self.m_page = page; self.width = 280; self.bgcolor = "#121212"; self.padding = 20
-        self.nav_col = ft.Column(spacing=5); self.content = ft.Column([ft.Container(content=ft.Row([ft.Icon(ft.Icons.DOMAIN, color=self.m_page.theme_color, size=30), ft.Text("ATAMASTER", size=24, weight=ft.FontWeight.BOLD, color="white")]), margin=ft.Margin(0, 10, 0, 40)), self.nav_col, ft.Divider(height=40, color="#333333"), ft.Container(content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=self.m_page.theme_color), ft.Text("NOVA REUNIÃO", color=self.m_page.theme_color, weight=ft.FontWeight.BOLD)]), padding=15, border=ft.Border.all(1, self.m_page.theme_color), border_radius=12, on_click=lambda _: self.m_page.run_task(self.m_page.push_route, "/new_meeting"), ink=True), ft.Container(expand=True), ft.Text("Business Intelligence 2.5", size=10, color="#444444"), ft.Text("Daniel Alves Anversi", size=11, italic=True, color="grey")], spacing=10); self.update_nav()
+        super().__init__(); self.m_page = page; self.width = 280; self.bgcolor = "#121212"; self.padding = ft.Padding(left=20, top=20, right=20, bottom=20)
+        self.nav_col = ft.Column(spacing=5)
+        self.content = ft.Column([
+            ft.Container(
+                content=ft.Row([ft.Icon(ft.Icons.DOMAIN, color=self.m_page.theme_color, size=30), ft.Text("ATAMASTER", size=24, weight=ft.FontWeight.BOLD, color="white")]),
+                margin=ft.Padding(left=0, top=10, right=0, bottom=40)
+            ),
+            self.nav_col,
+            ft.Divider(height=40, color="#333333"),
+            ft.Container(
+                content=ft.Row([ft.Icon(ft.Icons.ADD_CIRCLE, color=self.m_page.theme_color), ft.Text("NOVA REUNIÃO", color=self.m_page.theme_color, weight=ft.FontWeight.BOLD)]),
+                padding=ft.Padding(left=15, top=15, right=15, bottom=15),
+                border=ft.Border.all(1, self.m_page.theme_color),
+                border_radius=12,
+                on_click=lambda _: self.m_page.run_task(self.m_page.push_route_async, "/new_meeting"),
+                ink=True
+            ),
+            ft.Container(expand=True),
+            ft.Text("Business Intelligence 2.5", size=10, color="#444444"),
+            ft.Text("Daniel Alves Anversi", size=11, italic=True, color="grey")
+        ], spacing=10); self.update_nav()
     def update_nav(self): self.nav_col.controls = [self.nav_item(ft.Icons.DASHBOARD_ROUNDED, "Dashboard", "/"), self.nav_item(ft.Icons.DESCRIPTION_ROUNDED, "Histórico", "/meetings"), self.nav_item(ft.Icons.SETTINGS_SUGGEST_ROUNDED, "Gestão", "/management")]
     def nav_item(self, icon, text, route):
         is_active = self.m_page.route == route
         theme_color = self.m_page.theme_color
-        return ft.Container(content=ft.Row([ft.Icon(icon, color=theme_color if is_active else "grey"), ft.Text(text, color="white" if is_active else "grey", weight=ft.FontWeight.BOLD if is_active else ft.FontWeight.NORMAL)]), padding=12, border_radius=10, on_click=lambda _, r=route: self.m_page.run_task(self.m_page.push_route, r), ink=True, bgcolor="#222222" if is_active else "transparent")
+        return ft.Container(content=ft.Row([ft.Icon(icon, color=theme_color if is_active else "grey"), ft.Text(text, color="white" if is_active else "grey", weight=ft.FontWeight.BOLD if is_active else ft.FontWeight.NORMAL)]), padding=ft.Padding(left=12, top=12, right=12, bottom=12), border_radius=10, on_click=lambda _, r=route: self.m_page.run_task(self.m_page.push_route_async, r), ink=True, bgcolor="#222222" if is_active else "transparent")
 
 async def main(page: ft.Page):
     def run_task(coro, *args, **kwargs):
         return asyncio.create_task(coro(*args, **kwargs))
     page.run_task = run_task
-    async def push_route(route):
+
+    # Check for push_route availability
+    if not hasattr(page, "push_route"):
+        async def push_route_poly(route):
+            page.go(route)
+        page.push_route = push_route_poly
+
+    async def push_route_async(route):
         page.push_route(route)
-    page.push_route = push_route
+        page.update()
+    page.push_route_async = push_route_async
+
+    # Init DB first
     page.db = DBManager(); await page.db.init_db()
+
+    # Pickers MUST be in overlay
+    page.excel_picker = ft.FilePicker()
+    page.backup_picker = ft.FilePicker()
+    page.attach_picker = ft.FilePicker()
+    page.date_picker = ft.DatePicker(on_change=lambda e: page.run_task(page.current_view.handle_date_change, e) if hasattr(page, 'current_view') and hasattr(page.current_view, 'handle_date_change') else None)
+
+    page.overlay.extend([page.excel_picker, page.backup_picker, page.attach_picker, page.date_picker])
+
+    # Theme
     page.theme_color = await page.db.get_setting("theme_color", "cyan")
     page.title = "AtaMaster Pro"; page.theme_mode = ft.ThemeMode.DARK; page.padding = 0; page.theme = ft.Theme(font_family="Segoe UI", color_scheme_seed=page.theme_color)
-    page.excel_picker = ft.FilePicker(); page.backup_picker = ft.FilePicker(); page.attach_picker = ft.FilePicker(); page.date_picker = ft.DatePicker(on_change=lambda e: page.run_task(page.current_view.handle_date_change, e) if hasattr(page.current_view, 'handle_date_change') else None)
-    page.overlay.extend([page.excel_picker, page.backup_picker, page.attach_picker, page.date_picker])
+
+    # Page must be updated after overlay additions
+    page.update()
+
     async def run_backup(e=None):
         path = await page.backup_picker.save_file(file_name="atamaster_backup.db")
         if path: shutil.copy("atamaster.db", path)
     page.run_backup = run_backup
+
     async def run_restore(e=None):
         res = await page.backup_picker.pick_files(allowed_extensions=["db"])
-        if res and res.files: shutil.copy(res.files[0].path, "atamaster.db"); await page.db.init_db(); await page.push_route("/")
+        if res and res.files: shutil.copy(res.files[0].path, "atamaster.db"); await page.db.init_db(); await page.push_route_async("/")
     page.run_restore = run_restore
-    content_container = ft.Container(expand=True, padding=40, bgcolor="#0f0f0f"); sidebar = Sidebar(page)
+
+    content_container = ft.Container(expand=True, padding=ft.Padding(left=40, top=40, right=40, bottom=40), bgcolor="#0f0f0f"); sidebar = Sidebar(page)
+
     async def route_change(e):
         r = page.route
         if r == "/": v = DashboardView(page)
@@ -511,10 +559,18 @@ async def main(page: ft.Page):
         elif r == "/new_meeting": v = NewMeetingView(page)
         elif r.startswith("/meeting/"): v = MeetingDetailView(page, int(r.split("/")[-1]))
         else: v = ft.Text("404")
-        page.current_view = v; content_container.content = v; sidebar.update_nav(); page.update()
+
+        page.current_view = v
+        content_container.content = v
+        sidebar.update_nav()
+        page.update()
         if hasattr(v, 'refresh'): await v.refresh()
         page.update()
-    page.on_route_change = route_change; layout = ft.Row([sidebar, ft.VerticalDivider(width=1, color="#222222"), content_container], expand=True, spacing=0); page.add(layout); await page.push_route("/")
+
+    page.on_route_change = route_change
+    layout = ft.Row([sidebar, ft.VerticalDivider(width=1, color="#222222"), content_container], expand=True, spacing=0)
+    page.add(layout)
+    await page.push_route_async("/")
 
 if __name__ == "__main__":
     ft.run(main)
