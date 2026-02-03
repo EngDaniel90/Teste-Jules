@@ -70,7 +70,7 @@ def processar_dados_vendors():
         df_vendors = pd.read_excel(PATH_VENDORS_PUNCH)
         df_vendors.columns = df_vendors.columns.str.strip()
 
-        pending_petrobras = df_vendors[df_vendors['Status'].str.strip() == 'Pending Petrobras'].copy()
+        pending_petrobras = df_vendors[df_vendors['Status'].str.strip() == 'Pending PB Reply'].copy()
         disciplina_counts = pending_petrobras['Petrobras Discipline'].value_counts().to_dict()
 
         resultados = {
