@@ -95,6 +95,36 @@ LISTAS_SHAREPOINT = {
             "Days Since Date Cleared by Seatrium", "Modified By",
             "Item Type", "Path"
         ]
+    },
+    "Vendors DR60": {
+        "nome_api": "Vendor Package Review Punchlist DR60",
+        "arquivo_saida": "Punch_DR60_Vendors.xlsx",
+        "colunas": [
+            "Punch No", "Zone", "DECK No.", "Zone-Punch Number", "Action Description", "S3D Item Tags", "Punched by",
+            "Punch Snapshot", "Punch Snapshot 2", "Punch Snapshot 3", "Punch Snapshot 4", "Close-Out Snapshot 1",
+            "Close-Out Snapshot 2", "Action Comment", "Vendor Discipline", "Company", "Action by", "Status",
+            "Date Cleared by KBR", "Days Since Date Cleared by KBR", "Petrobras Response", "Petrobras Response by",
+            "Petrobras Response Date", "Petrobras Screenshot", "Remarks", "Petrobras Discipline", "Petrobras Category",
+            "Date Cleared by Petrobras", "Seatrium Remarks", "Seatrium Discipline", "Checked By (Seatrium)",
+            "Seatrium Comments", ("DateClearBySeatrium", "Date Cleared By Seatrium"),
+            "Days Since Date Cleared by Seatrium", "Modified By",
+            "Item Type", "Path"
+        ]
+    },
+    "Vendors DR30": {
+        "nome_api": "Vendor Package Review Punchlist",
+        "arquivo_saida": "Punch_DR30_Vendors.xlsx",
+        "colunas": [
+            "Punch No", "Zone", "DECK No.", "Zone-Punch Number", "Action Description", "S3D Item Tags", "Punched by",
+            "Punch Snapshot", "Punch Snapshot 2", "Punch Snapshot 3", "Punch Snapshot 4", "Close-Out Snapshot 1",
+            "Close-Out Snapshot 2", "Action Comment", "Vendor Discipline", "Company", "Action by", "Status",
+            "Date Cleared by KBR", "Days Since Date Cleared by KBR", "Petrobras Response", "Petrobras Response by",
+            "Petrobras Response Date", "Petrobras Screenshot", "Remarks", "Petrobras Discipline", "Petrobras Category",
+            "Date Cleared by Petrobras", "Seatrium Remarks", "Seatrium Discipline", "Checked By (Seatrium)",
+            "Seatrium Comments", ("DateClearBySeatrium", "Date Cleared By Seatrium"),
+            "Days Since Date Cleared by Seatrium", "Modified By",
+            "Item Type", "Path"
+        ]
     }
 }
 
