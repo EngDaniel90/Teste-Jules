@@ -26,7 +26,8 @@ PATH_VENDORS_GRAPH_DR60 = r"C:\Users\E797\Downloads\Teste mensagem e print\vendo
 PATH_VENDORS_PUNCH_DR90 = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_Vendors.xlsx"
 PATH_VENDORS_GRAPH_DR90 = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph_dr90.png"
 PATH_PENDENCIAS_OP_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\pendencias_operacao.png"
-EMAIL_DESTINO = "279a5359.petrobras.com.br@br.teams.ms"
+EMAIL_DESTINO_TEAMS_TS = "279a5359.petrobras.com.br@br.teams.ms"
+EMAIL_DESTINO_VENDORS_DR30_DR60 = "7a888adb.petrobras.com.br@br.teams.ms"
 EMAIL_LOG = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
 EMAIL_MELISSA = "melissa.rodrigues@petrobras.com.br"
@@ -379,7 +380,7 @@ def enviar_email_ehouse(dados):
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
         mail.Importance = 2
-        mail.To = EMAIL_DESTINO
+        mail.To = EMAIL_DESTINO_TEAMS_TS
         mail.CC = f"{EMAIL_MELISSA}; {EMAIL_ANDRE}"
         mail.Subject = f"Status Report: Punch List DR90 E-House - {datetime.now().strftime('%d/%m/%Y')}"
 
@@ -530,7 +531,7 @@ def gerar_grafico_pendencias_operacao(df_op_check):
         return False, log
 
 
-def enviar_email_vendors(dados, report_title, graph_path):
+def enviar_email_vendors(dados, report_title, graph_path, recipient_email):
     """
     Envia um e-mail de status específico para a punch list de Vendors.
     """
@@ -543,7 +544,7 @@ def enviar_email_vendors(dados, report_title, graph_path):
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
         mail.Importance = 2
-        mail.To = EMAIL_DESTINO
+        mail.To = recipient_email
         mail.CC = f"{EMAIL_MELISSA}; {EMAIL_ANDRE}"
         mail.Subject = f"Status Report: {report_title} - {datetime.now().strftime('%d/%m/%Y')}"
 
@@ -597,7 +598,7 @@ def enviar_email(dados, log_processo):
         # E-mail Principal para o Canal
         mail = outlook.CreateItem(0)
         mail.Importance = 2
-        mail.To = EMAIL_DESTINO
+        mail.To = EMAIL_DESTINO_TEAMS_TS
         mail.CC = f"{EMAIL_MELISSA}; {EMAIL_ANDRE}"
         mail.Subject = f"Status Report: Punch List DR90 TS - {datetime.now().strftime('%d/%m/%Y')}"
 
@@ -713,7 +714,7 @@ def enviar_email(dados, log_processo):
             mail.Attachments.Add(PATH_PENDENCIAS_OP_GRAPH)
 
         mail.Send()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO}.")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO_TEAMS_TS}.")
 
         # E-mail de Log de Sucesso
         log_mail = outlook.CreateItem(0)
@@ -857,15 +858,16 @@ def execute_full_report_process():
     print("\n--- [FLUXO 4/4] Processando Relatórios de Vendors ---")
 
     vendor_reports = [
-        {"title": "Punch List DR30 Vendors", "punch_path": PATH_VENDORS_PUNCH_DR30, "graph_path": PATH_VENDORS_GRAPH_DR30},
-        {"title": "Punch List DR60 Vendors", "punch_path": PATH_VENDORS_PUNCH_DR60, "graph_path": PATH_VENDORS_GRAPH_DR60},
-        {"title": "Punch List DR90 Vendors", "punch_path": PATH_VENDORS_PUNCH_DR90, "graph_path": PATH_VENDORS_GRAPH_DR90}
+        {"title": "Punch List DR30 Vendors", "punch_path": PATH_VENDORS_PUNCH_DR30, "graph_path": PATH_VENDORS_GRAPH_DR30, "email": EMAIL_DESTINO_VENDORS_DR30_DR60},
+        {"title": "Punch List DR60 Vendors", "punch_path": PATH_VENDORS_PUNCH_DR60, "graph_path": PATH_VENDORS_GRAPH_DR60, "email": EMAIL_DESTINO_VENDORS_DR30_DR60},
+        {"title": "Punch List DR90 Vendors", "punch_path": PATH_VENDORS_PUNCH_DR90, "graph_path": PATH_VENDORS_GRAPH_DR90, "email": EMAIL_DESTINO_TEAMS_TS}
     ]
 
     for report in vendor_reports:
         title = report["title"]
         punch_path = report["punch_path"]
         graph_path = report["graph_path"]
+        recipient_email = report["email"]
 
         print(f"\n--- Processando: {title} ---")
         try:
@@ -875,7 +877,7 @@ def execute_full_report_process():
                 sucesso_grafico, log_grafico = gerar_dashboard_vendors(dados_vendors, title, graph_path)
                 if sucesso_grafico:
                     print(f"-> Dashboard de {title} gerado com sucesso.")
-                    enviar_email_vendors(dados_vendors, title, graph_path)
+                    enviar_email_vendors(dados_vendors, title, graph_path, recipient_email)
                 else:
                     print(f"-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE {title} !!!")
                     enviar_email_de_falha(log_vendors + log_grafico)
