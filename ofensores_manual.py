@@ -7,6 +7,7 @@ import seaborn as sns
 import os
 import matplotlib.dates as mdates
 import numpy as np
+
 # --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
 PATH_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx"
 PATH_RDS = r"C:\Users\E797\Downloads\Teste mensagem e print\RDs_ESUP.xlsx"
@@ -794,8 +795,10 @@ def enviar_mensagem_julius(dados):
         print(f"ERRO CRÍTICO ao enviar e-mail para Julius: {str(e)}\n{erro_detalhado}")
 
 
-# --- AGENDAMENTO E EXECUÇÃO CONTÍNUA ---
-if __name__ == "__main__":
+def execute_full_report_process():
+    """
+    Executa o processo completo de geração de relatórios para Topside, E-House e Vendors.
+    """
     print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
 
     # --- FLUXO 1: Relatório Principal (Topside) ---
@@ -883,3 +886,7 @@ if __name__ == "__main__":
             enviar_email_de_falha([f"Erro em {title}: {str(e)}"])
 
     print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
+
+
+if __name__ == "__main__":
+    execute_full_report_process()
