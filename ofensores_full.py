@@ -19,8 +19,12 @@ PATH_ESUP_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\ESUP to check
 PATH_JULIUS_CHECK = r"C:\Users\E797\Downloads\Teste mensagem e print\Julius to check.xlsx"
 PATH_EHOUSE_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_E-House.xlsx"
 PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
-PATH_VENDORS_PUNCH = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_Vendors.xlsx"
-PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
+PATH_VENDORS_PUNCH_DR30 = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR30_Vendors.xlsx"
+PATH_VENDORS_GRAPH_DR30 = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph_dr30.png"
+PATH_VENDORS_PUNCH_DR60 = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR60_Vendors.xlsx"
+PATH_VENDORS_GRAPH_DR60 = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph_dr60.png"
+PATH_VENDORS_PUNCH_DR90 = r"C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_Vendors.xlsx"
+PATH_VENDORS_GRAPH_DR90 = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph_dr90.png"
 PATH_PENDENCIAS_OP_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\pendencias_operacao.png"
 EMAIL_DESTINO = "279a5359.petrobras.com.br@br.teams.ms"
 EMAIL_LOG = "658b4ef7.petrobras.com.br@br.teams.ms"
@@ -58,16 +62,16 @@ def processar_dados_ehouse():
         return None, log, False
 
 
-def processar_dados_vendors():
+def processar_dados_vendors(punch_path):
     """
     Processa os dados da planilha de Vendors para o relatório específico.
     """
     log = []
     try:
-        if not os.path.exists(PATH_VENDORS_PUNCH):
-            raise FileNotFoundError(f"Arquivo Vendors não encontrado: {PATH_VENDORS_PUNCH}")
+        if not os.path.exists(punch_path):
+            raise FileNotFoundError(f"Arquivo Vendors não encontrado: {punch_path}")
 
-        df_vendors = pd.read_excel(PATH_VENDORS_PUNCH)
+        df_vendors = pd.read_excel(punch_path)
         df_vendors.columns = df_vendors.columns.str.strip()
 
         pending_petrobras = df_vendors[df_vendors['Status'].str.strip() == 'Pending PB Reply'].copy()
@@ -419,7 +423,7 @@ def enviar_email_ehouse(dados):
         print(f"ERRO CRÍTICO ao enviar e-mail de E-House: {str(e)}\n{erro_detalhado}")
 
 
-def gerar_dashboard_vendors(dados):
+def gerar_dashboard_vendors(dados, report_title, graph_path):
     """
     Gera uma imagem de dashboard para o status de Vendors.
     """
@@ -437,7 +441,7 @@ def gerar_dashboard_vendors(dados):
         cor_destaque = "#FFD700"  # Dourado
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 2]})
-        fig.suptitle('Status Report - Vendor Packages DR90', fontsize=24, fontweight='bold', color=cor_principal)
+        fig.suptitle(report_title, fontsize=24, fontweight='bold', color=cor_principal)
 
         ax1.set_title('Visão Geral dos Itens', fontsize=16, fontweight='bold')
         sns.barplot(x=['Total de Itens', 'Pendentes (PB)'], y=[total_punches, pending_reply],
@@ -469,10 +473,10 @@ def gerar_dashboard_vendors(dados):
             ax2.set_yticks([])
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
-        plt.savefig(PATH_VENDORS_GRAPH, dpi=200, bbox_inches='tight')
+        plt.savefig(graph_path, dpi=200, bbox_inches='tight')
         plt.close()
 
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dashboard de Vendors gerado com sucesso.")
+        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dashboard de Vendors gerado com sucesso em {graph_path}.")
         return True, log
 
     except Exception as e:
@@ -526,13 +530,13 @@ def gerar_grafico_pendencias_operacao(df_op_check):
         return False, log
 
 
-def enviar_email_vendors(dados):
+def enviar_email_vendors(dados, report_title, graph_path):
     """
     Envia um e-mail de status específico para a punch list de Vendors.
     """
     if dados is None or dados.get("total_pending", 0) == 0:
         print(
-            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Nenhum item 'Pending Petrobras' em Vendors. E-mail não enviado.")
+            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Nenhum item 'Pending PB Reply' em {report_title}. E-mail não enviado.")
         return
 
     try:
@@ -541,7 +545,7 @@ def enviar_email_vendors(dados):
         mail.Importance = 2
         mail.To = EMAIL_DESTINO
         mail.CC = f"{EMAIL_MELISSA}; {EMAIL_ANDRE}"
-        mail.Subject = f"Status Report: Punch List DR90 Vendors - {datetime.now().strftime('%d/%m/%Y')}"
+        mail.Subject = f"Status Report: {report_title} - {datetime.now().strftime('%d/%m/%Y')}"
 
         disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
 
@@ -558,9 +562,9 @@ def enviar_email_vendors(dados):
         <body>
             <p class="mention">@Acompanhamento Design Review TS</p>
             <p>Prezados,</p>
-            <p>Segue a atualização de status da <b>Punch List de Vendors (Fornecedores)</b>:</p>
+            <p>Segue a atualização de status da <b>Punch List de Vendors ({report_title})</b>:</p>
 
-            <p>Atualmente, temos <span class="highlight">{dados['total_pending']}</span> itens com status <b>Pending Petrobras</b>.</p>
+            <p>Atualmente, temos <span class="highlight">{dados['total_pending']}</span> itens com status <b>Pending PB Reply</b>.</p>
 
             <p><b>Detalhamento por Disciplina:</b></p>
             <ul>{disciplinas_html}</ul>
@@ -572,15 +576,15 @@ def enviar_email_vendors(dados):
         </html>
         """
 
-        if os.path.exists(PATH_VENDORS_GRAPH):
-            mail.Attachments.Add(PATH_VENDORS_GRAPH)
+        if os.path.exists(graph_path):
+            mail.Attachments.Add(graph_path)
 
         mail.Send()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de status Vendors enviado com sucesso.")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de status para {report_title} enviado com sucesso.")
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
-        print(f"ERRO CRÍTICO ao enviar e-mail de Vendors: {str(e)}\n{erro_detalhado}")
+        print(f"ERRO CRÍTICO ao enviar e-mail de Vendors para {report_title}: {str(e)}\n{erro_detalhado}")
 
 
 def enviar_email(dados, log_processo):
@@ -849,24 +853,37 @@ def execute_full_report_process():
         print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE: {e} !!!")
         enviar_email_de_falha([str(e)])
 
-    # --- FLUXO 4: Relatório Vendors ---
-    print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
-    try:
-        dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
-        if sucesso_vendors:
-            print("-> Dados de Vendors processados com sucesso.")
-            sucesso_grafico, log_grafico = gerar_dashboard_vendors(dados_vendors)
-            if sucesso_grafico:
-                print("-> Dashboard de Vendors gerado com sucesso.")
-                enviar_email_vendors(dados_vendors)
-            else:
-                print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE VENDORS !!!")
-                enviar_email_de_falha(log_vendors + log_grafico)
-    except FileNotFoundError as e:
-        print(f"-> Arquivo de Vendors não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
-    except Exception as e:
-        print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE VENDORS: {e} !!!")
-        enviar_email_de_falha([str(e)])
+    # --- FLUXO 4: Relatórios de Vendors (DR30, DR60, DR90) ---
+    print("\n--- [FLUXO 4/4] Processando Relatórios de Vendors ---")
+
+    vendor_reports = [
+        {"title": "Punch List DR30 Vendors", "punch_path": PATH_VENDORS_PUNCH_DR30, "graph_path": PATH_VENDORS_GRAPH_DR30},
+        {"title": "Punch List DR60 Vendors", "punch_path": PATH_VENDORS_PUNCH_DR60, "graph_path": PATH_VENDORS_GRAPH_DR60},
+        {"title": "Punch List DR90 Vendors", "punch_path": PATH_VENDORS_PUNCH_DR90, "graph_path": PATH_VENDORS_GRAPH_DR90}
+    ]
+
+    for report in vendor_reports:
+        title = report["title"]
+        punch_path = report["punch_path"]
+        graph_path = report["graph_path"]
+
+        print(f"\n--- Processando: {title} ---")
+        try:
+            dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors(punch_path)
+            if sucesso_vendors:
+                print(f"-> Dados de {title} processados com sucesso.")
+                sucesso_grafico, log_grafico = gerar_dashboard_vendors(dados_vendors, title, graph_path)
+                if sucesso_grafico:
+                    print(f"-> Dashboard de {title} gerado com sucesso.")
+                    enviar_email_vendors(dados_vendors, title, graph_path)
+                else:
+                    print(f"-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE {title} !!!")
+                    enviar_email_de_falha(log_vendors + log_grafico)
+        except FileNotFoundError as e:
+            print(f"-> Arquivo para {title} não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
+        except Exception as e:
+            print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE {title}: {e} !!!")
+            enviar_email_de_falha([f"Erro em {title}: {str(e)}"])
 
     print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
 
