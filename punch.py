@@ -73,7 +73,7 @@ LISTAS_SHAREPOINT = {
             "KBR Response", "KBR Response Date", "KBR Response by", "KBR Remarks", "KBR Category", "KBR Discipline",
             "KBR Screenshot", "Date Cleared by KBR", "Days Since Date Cleared By KBR", "Seatrium Discipline",
             "Seatrium Remarks", "Checked By (Seatrium)", "Seatrium Comments",
-            ("DateClearBySeatrium", "Date Cleared By Seatrium"),
+            "Date Cleared By Seatrium",
             "Days Since Date Cleared by Seatrium", "Petrobras Response", "Petrobras Response By",
             "Petrobras Screenshot",
             "Petrobras Response Date", "Petrobras Remarks", "Petrobras Discipline", "Petrobras Category",
