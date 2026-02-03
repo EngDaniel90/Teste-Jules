@@ -317,7 +317,12 @@ class AutomacaoPunchList:
         if not df.empty:
             # Reordenar para garantir que as colunas desejadas venham primeiro, na ordem correta
             final_ordered_columns = final_display_names + sorted(list(all_extra_columns))
-            existing_cols = [col for col in final_ordered_columns if col in df.columns]
+            existing_cols = []
+            seen_cols = set()
+            for col in final_ordered_columns:
+                if col in df.columns and col not in seen_cols:
+                    existing_cols.append(col)
+                    seen_cols.add(col)
             df = df[existing_cols]
 
         self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
