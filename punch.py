@@ -8,6 +8,7 @@ import requests
 import pandas as pd
 from datetime import datetime
 import re
+import tempfile
 
 # openpyxl imports
 import openpyxl
@@ -609,25 +610,41 @@ class AutomacaoPunchList:
                         if results:
                             df_final = self.tratar_dados(results, colunas_desejadas)
 
-                            # --- LOOP PARA SALVAR EM MÚLTIPLOS DESTINOS ---
-                            for pasta_destino in PASTAS_DESTINO:
-                                caminho_final = os.path.join(pasta_destino, arquivo_saida)
-                                try:
-                                    # Cria pasta se não existir na hora H (garantia extra)
-                                    if not os.path.exists(pasta_destino):
-                                        os.makedirs(pasta_destino)
+                            # --- NOVA ESTRATÉGIA: SALVAR EM TEMP, FORMATAR E COPIAR ---
+                            # Cria arquivo temporário
+                            fd, temp_path = tempfile.mkstemp(suffix=".xlsx")
+                            os.close(fd) # Fecha o descritor de arquivo de baixo nível
 
-                                    df_final.to_excel(caminho_final, index=False)
-                                    self.registrar_log(f"SUCESSO: Planilha '{nome_lista}' salva em: {caminho_final}")
-                                except PermissionError:
-                                    self.registrar_log(
-                                        f"ERRO DE PERMISSÃO: O arquivo '{arquivo_saida}' está aberto em {pasta_destino}. Feche-o.")
-                                    # Não marcamos ciclo_sucesso = False aqui para permitir que salve nas outras pastas se possível
-                                    # Mas se for crítico, pode descomentar a linha abaixo:
-                                    # ciclo_sucesso = False
-                                except Exception as e_save:
-                                    self.registrar_log(f"ERRO ao salvar arquivo em {pasta_destino}: {e_save}")
-                                    ciclo_sucesso = False
+                            try:
+                                # Salva o DataFrame no arquivo temporário
+                                df_final.to_excel(temp_path, index=False)
+                                self.registrar_log(f"Arquivo temporário gerado: {temp_path}")
+
+                                # Aplica formatação (Tabela Excel) diretamente no arquivo temporário
+                                self.formatar_arquivo_unico(temp_path, arquivo_saida)
+
+                                # Copia o arquivo finalizado para todas as pastas de destino
+                                for pasta_destino in PASTAS_DESTINO:
+                                    caminho_final = os.path.join(pasta_destino, arquivo_saida)
+                                    try:
+                                        if not os.path.exists(pasta_destino):
+                                            os.makedirs(pasta_destino)
+
+                                        shutil.copy2(temp_path, caminho_final)
+                                        self.registrar_log(f"SUCESSO: Planilha salva em: {caminho_final}")
+                                    except PermissionError:
+                                        self.registrar_log(f"ERRO DE PERMISSÃO: Arquivo aberto ou bloqueado em {pasta_destino}. Feche-o.")
+                                    except Exception as e_copy:
+                                        self.registrar_log(f"ERRO ao copiar para {pasta_destino}: {e_copy}")
+
+                            finally:
+                                # Limpeza do arquivo temporário
+                                if os.path.exists(temp_path):
+                                    try:
+                                        os.remove(temp_path)
+                                    except Exception as e_del:
+                                        self.registrar_log(f"AVISO: Não foi possível remover temp file {temp_path}: {e_del}")
+
                         else:
                             self.registrar_log(f"AVISO: A lista '{nome_lista}' está vazia.")
                     else:
@@ -639,92 +656,62 @@ class AutomacaoPunchList:
                 finally:
                     self.registrar_log(f"--- Fim lista: {nome_lista} ---\n")
 
-            # Após o download de todas as listas, inicia a formatação
-            self.formatar_arquivos_como_tabela()
-
         except Exception as e_ciclo:
             self.registrar_log(f"Falha crítica no ciclo: {e_ciclo}")
             ciclo_sucesso = False
         finally:
             self.enviar_via_outlook_app(ciclo_sucesso)
 
-    def formatar_arquivos_como_tabela(self):
+    def formatar_arquivo_unico(self, caminho_completo, arquivo_nome):
         """
-        Percorre pastas, limpa cabeçalhos e formata os dados como Tabela 'Tabela_query'.
+        Aplica a formatação de Tabela Excel em um único arquivo (normalmente o temporário).
         """
-        self.registrar_log("--- Iniciando formatação de tabelas (com limpeza de cabeçalho) ---")
         estilo = TableStyleInfo(name="TableStyleMedium9", showFirstColumn=False, showLastColumn=False,
                                 showRowStripes=True, showColumnStripes=False)
+        try:
+            wb = openpyxl.load_workbook(caminho_completo)
+            sheet = wb.active
+            if sheet.max_row <= 1:
+                self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' (temp) vazio ou apenas cabeçalhos. Tabela não criada.")
+                wb.save(caminho_completo)
+                return
 
-        for pasta in PASTAS_DESTINO:
-            if not os.path.exists(pasta):
-                self.registrar_log(f"AVISO: Pasta de formatação '{pasta}' não encontrada. Pulando...")
-                continue
-            self.registrar_log(f"Verificando arquivos para formatação em: {pasta}")
+            if "Tabela_query" in sheet.tables:
+                del sheet.tables["Tabela_query"]
 
-            for config_lista in LISTAS_SHAREPOINT.values():
-                arquivo_nome = config_lista["arquivo_saida"]
-                caminho_completo = os.path.join(pasta, arquivo_nome)
-                if not os.path.exists(caminho_completo):
-                    self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' não encontrado em '{pasta}'.")
-                    continue
+            # --- Lógica de Limpeza e Desduplicação de Cabeçalho ---
+            headers = [cell.value for cell in sheet[1]]
+            novos_headers = []
+            seen_headers = set()
 
-                try:
-                    wb = openpyxl.load_workbook(caminho_completo)
-                    sheet = wb.active
-                    if sheet.max_row <= 1:
-                        self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' está vazio ou contém apenas cabeçalhos.")
-                        wb.save(caminho_completo)
-                        continue
+            for header in headers:
+                sanitized = self._sanitize_header(header)
 
-                    if "Tabela_query" in sheet.tables:
-                        self.registrar_log(f"INFO: Arquivo '{arquivo_nome}' já possui 'Tabela_query' formatada.")
-                        continue
+                # Garante unicidade
+                final_header = sanitized
+                counter = 2
+                while final_header in seen_headers:
+                    final_header = f"{sanitized}_{counter}"
+                    counter += 1
 
-                    # --- Lógica de Limpeza e Desduplicação de Cabeçalho ---
-                    headers = [cell.value for cell in sheet[1]]
-                    novos_headers = []
-                    seen_headers = set()
+                novos_headers.append(final_header)
+                seen_headers.add(final_header)
 
-                    for header in headers:
-                        sanitized = self._sanitize_header(header)
+            # Escreve os cabeçalhos limpos de volta na planilha
+            for col_idx, new_header_text in enumerate(novos_headers, 1):
+                sheet.cell(row=1, column=col_idx, value=new_header_text)
 
-                        # Garante unicidade
-                        final_header = sanitized
-                        counter = 2
-                        while final_header in seen_headers:
-                            final_header = f"{sanitized}_{counter}"
-                            counter += 1
+            # Cria a nova tabela
+            referencia = f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
+            tab = Table(displayName="Tabela_query", ref=referencia)
+            tab.tableStyleInfo = estilo
+            sheet.add_table(tab)
 
-                        novos_headers.append(final_header)
-                        seen_headers.add(final_header)
+            wb.save(caminho_completo)
+            self.registrar_log(f"INFO: Formatação de tabela aplicada com sucesso em '{arquivo_nome}'.")
 
-                    # Escreve os cabeçalhos limpos de volta na planilha
-                    for col_idx, new_header_text in enumerate(novos_headers, 1):
-                        sheet.cell(row=1, column=col_idx, value=new_header_text)
-
-                    # Se houver tabelas existentes com outros nomes, removemos para evitar conflitos
-                    if sheet.tables:
-                        for table_name in list(sheet.tables.keys()):
-                            self.registrar_log(
-                                f"INFO: Removendo tabela antiga '{table_name}' para recriar com cabeçalhos limpos.")
-                            del sheet.tables[table_name]
-
-                    # Cria a nova tabela com os cabeçalhos já limpos
-                    if sheet.max_row > 0:
-                        referencia = f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
-                        tab = Table(displayName="Tabela_query", ref=referencia)
-                        tab.tableStyleInfo = estilo
-                        sheet.add_table(tab)
-                        self.registrar_log(f"SUCESSO: Cabeçalhos limpos e 'Tabela_query' criada em '{arquivo_nome}'.")
-                    else:
-                        self.registrar_log(f"AVISO: Sem dados para criar a tabela em '{arquivo_nome}'.")
-
-                    wb.save(caminho_completo)
-
-                except Exception as e:
-                    self.registrar_log(f"ERRO CRÍTICO ao formatar '{arquivo_nome}': {e}")
-        self.registrar_log("--- Formatação de tabelas concluída ---")
+        except Exception as e:
+            self.registrar_log(f"ERRO ao formatar tabela em '{arquivo_nome}': {e}")
 
     def executar(self):
         self.iniciar_sessao_navegador()
