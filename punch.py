@@ -497,11 +497,15 @@ class AutomacaoPunchList:
 
     def _sanitize_header(self, header_text):
         """Remove caracteres inválidos para cabeçalhos de tabela do Excel e garante unicidade."""
+        if header_text is None:
+            return "Coluna"
         if not isinstance(header_text, str):
             header_text = str(header_text)
         # Remove caracteres inválidos para nomes de tabelas/cabeçalhos do Excel
         invalid_chars = r'[\[\]/\\*?:\']'
         sanitized = re.sub(invalid_chars, '', header_text)
+        if not sanitized.strip():
+            return "Coluna"
         # Trunca para o limite de 255 caracteres do Excel
         return sanitized[:255]
 
