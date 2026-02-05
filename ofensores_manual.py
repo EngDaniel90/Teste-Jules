@@ -113,15 +113,37 @@ def processar_dados():
         log.append(f"[{hoje.strftime('%Y-%m-%d %H:%M:%S')}] Planilhas carregadas com sucesso.")
 
         # --- NOVO: Localizador dinâmico para a coluna 'accept closing' ---
+        # Prioriza a busca exata pelo cabeçalho (YN), mas mantém fallback
+        possible_headers = [
+            "Petrobras Operation accept closing (YN)",
+            "Petrobras Operation accept closing (Y/N)",
+            "Petrobras Operation accept closing"
+        ]
         col_accept_closing = None
-        for col in df.columns:
-            if "Petrobras Operation accept closing" in col:
-                col_accept_closing = col
+        for header in possible_headers:
+            # Verifica se o cabeçalho existe (considerando que df.columns já sofreu strip)
+            # O ideal é verificar se alguma coluna do df bate com o header
+            match = [c for c in df.columns if c == header]
+            if match:
+                col_accept_closing = match[0]
                 break
+
+        # Fallback genérico se não encontrar os exatos
+        if col_accept_closing is None:
+            for col in df.columns:
+                if "Petrobras Operation accept closing" in col:
+                    col_accept_closing = col
+                    break
 
         if col_accept_closing is None:
             raise KeyError(f"A coluna 'Petrobras Operation accept closing' não foi encontrada. Colunas disponíveis: {list(df.columns)}")
 
+        # Normalização dos valores da coluna 'accept closing' para facilitar os filtros booleanos
+        # Converte 'Y', 'y', 'Yes', 'yes' para True e o restante para False (ou mantém NaN)
+        # Isso corrige o problema onde a comparação "== True" falhava para strings "Y"
+        df[col_accept_closing] = df[col_accept_closing].apply(
+            lambda x: True if str(x).strip().upper() in ['Y', 'YES', 'TRUE'] else (False if pd.notna(x) else x)
+        )
 
         # 2. Contagem de Status Geral
         status_counts = df['Status'].value_counts().to_dict()
