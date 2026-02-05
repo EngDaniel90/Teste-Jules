@@ -672,8 +672,9 @@ class AutomacaoPunchList:
                 try:
                     wb = openpyxl.load_workbook(caminho_completo)
                     sheet = wb.active
-                    if sheet.max_row < 1:
-                        self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' está vazio ou sem cabeçalhos.")
+                    if sheet.max_row <= 1:
+                        self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' está vazio ou contém apenas cabeçalhos.")
+                        wb.save(caminho_completo)
                         continue
 
                     if "Tabela_query" in sheet.tables:
