@@ -892,10 +892,11 @@ def execute_full_report_process():
 
 # --- AGENDAMENTO E EXECUÇÃO CONTÍNUA ---
 if __name__ == "__main__":
-    # Agenda a execução da função para as 08:00 da manhã, todos os dias
+    # Agenda a execução da função para as 08:00 e 19:00, todos os dias
     schedule.every().day.at("08:00").do(execute_full_report_process)
+    schedule.every().day.at("19:00").do(execute_full_report_process)
 
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Agendamento configurado para executar diariamente às 08:00. O script está em execução.")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Agendamento configurado para executar diariamente às 08:00 e 19:00. O script está em execução.")
     print("Próximas execuções:")
     for job in schedule.jobs:
         print(f"- {job.next_run.strftime('%Y-%m-%d %H:%M:%S')}")
