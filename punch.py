@@ -73,7 +73,7 @@ LISTAS_SHAREPOINT = {
             "KBR Response", "KBR Response Date", "KBR Response by", "KBR Remarks", "KBR Category", "KBR Discipline",
             "KBR Screenshot", "Date Cleared by KBR", "Days Since Date Cleared By KBR", "Seatrium Discipline",
             "Seatrium Remarks", "Checked By (Seatrium)", "Seatrium Comments",
-            ("DateClearBySeatrium", "Date Cleared By Seatrium"),
+            "Date Cleared By Seatrium",
             "Days Since Date Cleared by Seatrium", "Petrobras Response", "Petrobras Response By",
             "Petrobras Screenshot",
             "Petrobras Response Date", "Petrobras Remarks", "Petrobras Discipline", "Petrobras Category",
@@ -91,7 +91,7 @@ LISTAS_SHAREPOINT = {
             "Date Cleared by KBR", "Days Since Date Cleared by KBR", "Petrobras Response", "Petrobras Response by",
             "Petrobras Response Date", "Petrobras Screenshot", "Remarks", "Petrobras Discipline", "Petrobras Category",
             "Date Cleared by Petrobras", "Seatrium Remarks", "Seatrium Discipline", "Checked By (Seatrium)",
-            "Seatrium Comments", ("DateClearBySeatrium", "Date Cleared By Seatrium"),
+            "Seatrium Comments", "Date Cleared By Seatrium",
             "Days Since Date Cleared by Seatrium", "Modified By",
             "Item Type", "Path"
         ]
@@ -285,18 +285,40 @@ class AutomacaoPunchList:
         df = pd.DataFrame(processed_data)
 
         if not df.empty:
-            # Reordenar para garantir que as colunas desejadas venham primeiro, na ordem correta
-            final_ordered_columns = final_display_names + sorted(list(all_extra_columns))
-            existing_cols = [col for col in final_ordered_columns if col in df.columns]
-            df = df[existing_cols]
+            # Reordenar para garantir que as colunas desejadas venham primeiro, na ordem correta, sem duplicatas
+            seen_ordered = set()
+            unique_ordered_cols = []
+            for col_name in (final_display_names + sorted(list(all_extra_columns))):
+                if col_name in df.columns and col_name not in seen_ordered:
+                    unique_ordered_cols.append(col_name)
+                    seen_ordered.add(col_name)
+            df = df[unique_ordered_cols]
 
         self.registrar_log(f"DataFrame criado com {df.shape[0]} linhas e {df.shape[1]} colunas.")
+        # Limpeza inicial: strip e normalização de espaços
         df.columns = df.columns.str.strip().str.replace(r'\s+', ' ', regex=True)
+
+        # Sanitização para Excel: remove caracteres proibidos e garante que não seja vazio
+        invalid_chars_re = r'[\[\]/\\*?:\']'
+        df.columns = [re.sub(invalid_chars_re, '', str(c)).strip() or "Coluna" for c in df.columns]
+
+        # Trata duplicatas de nomes que podem surgir após o strip/replace/sanitização
+        if df.columns.duplicated().any():
+            new_cols = []
+            seen_cols = {}
+            for c in df.columns:
+                if c not in seen_cols:
+                    new_cols.append(c)
+                    seen_cols[c] = 1
+                else:
+                    seen_cols[c] += 1
+                    new_cols.append(f"{c}_{seen_cols[c]}")
+            df.columns = new_cols
 
         # ----- Limpeza e Formatação -----
         self.registrar_log("Limpando e formatando o DataFrame final...")
         for col in df.columns:
-            df[col] = df[col].astype(str).fillna('')
+            df[col] = df[col].astype(str).replace(['None', 'nan', 'NaN'], '')
             df.loc[df[col].str.contains("error|#error", case=False, na=False), col] = ""
 
             is_date_col = "Date" in col or "Target" in col
@@ -461,12 +483,20 @@ class AutomacaoPunchList:
         return base_results
 
     def _sanitize_header(self, header_text):
-        """Remove caracteres inválidos para cabeçalhos de tabela do Excel e garante unicidade."""
-        if not isinstance(header_text, str):
-            header_text = str(header_text)
-        # Remove caracteres inválidos para nomes de tabelas/cabeçalhos do Excel
+        """Remove caracteres inválidos para cabeçalhos de tabela do Excel."""
+        if header_text is None:
+            return "Coluna"
+        header_str = str(header_text).strip()
+        if not header_str:
+            return "Coluna"
+
+        # Remove caracteres inválidos para nomes de tabelas/cabeçalhos do Excel: [ ] / \ * ? : '
         invalid_chars = r'[\[\]/\\*?:\']'
-        sanitized = re.sub(invalid_chars, '', header_text)
+        sanitized = re.sub(invalid_chars, '', header_str).strip()
+
+        if not sanitized:
+            return "Coluna"
+
         # Trunca para o limite de 255 caracteres do Excel
         return sanitized[:255]
 
@@ -546,7 +576,7 @@ class AutomacaoPunchList:
                         col_info = self.get_col_info(source_name)
 
                         if not col_info:
-                            missing_columns.append(nome_coluna)
+                            missing_columns.append(source_name)
                             continue
 
                         internal_name = col_info['internal_name']
@@ -663,22 +693,22 @@ class AutomacaoPunchList:
                     for col_idx, new_header_text in enumerate(novos_headers, 1):
                         sheet.cell(row=1, column=col_idx, value=new_header_text)
 
-                    # Se houver tabelas existentes com outros nomes, removemos para evitar conflitos
+                    # Remove TODAS as tabelas existentes para recriar do zero e evitar conflitos
                     if sheet.tables:
                         for table_name in list(sheet.tables.keys()):
-                            self.registrar_log(
-                                f"INFO: Removendo tabela antiga '{table_name}' para recriar com cabeçalhos limpos.")
                             del sheet.tables[table_name]
 
-                    # Cria a nova tabela com os cabeçalhos já limpos
-                    if sheet.max_row > 0:
+                    # Cria a nova tabela (Excel exige pelo menos 2 linhas: cabeçalho + 1 de dados)
+                    if sheet.max_row > 1:
                         referencia = f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
                         tab = Table(displayName="Tabela_query", ref=referencia)
                         tab.tableStyleInfo = estilo
                         sheet.add_table(tab)
                         self.registrar_log(f"SUCESSO: Cabeçalhos limpos e 'Tabela_query' criada em '{arquivo_nome}'.")
+                    elif sheet.max_row == 1:
+                        self.registrar_log(f"AVISO: Apenas cabeçalhos em '{arquivo_nome}'. Tabela não criada (Excel exige dados).")
                     else:
-                        self.registrar_log(f"AVISO: Sem dados para criar a tabela em '{arquivo_nome}'.")
+                        self.registrar_log(f"AVISO: Arquivo '{arquivo_nome}' sem dados.")
 
                     wb.save(caminho_completo)
 
