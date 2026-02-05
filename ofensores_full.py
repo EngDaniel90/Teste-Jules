@@ -193,7 +193,7 @@ def processar_dados():
         # Itens para ESUP checar (Parte 2: Operação respondeu 'False')
         mask_esup_p2 = (df['Status'].str.strip() == 'Pending PB Reply') & \
                        (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
-                       (df[col_accept_closing] == False)
+                       (df[col_accept_closing].astype(str).str.strip().str.upper() == 'N')
         df_esup_p2 = df[mask_esup_p2].copy()
 
         df_esup_check = pd.concat([df_esup_p1, df_esup_p2]).drop_duplicates().reset_index(drop=True)
@@ -201,7 +201,7 @@ def processar_dados():
         # Itens para Julius checar (Operação respondeu 'True')
         mask_julius = (df['Status'].str.strip() == 'Pending PB Reply') & \
                       (df['Punched by (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
-                      (df[col_accept_closing] == True)
+                      (df[col_accept_closing].astype(str).str.strip().str.upper() == 'Y')
         df_julius_check = df[mask_julius].copy()
 
         # --- NOVO: Agrupamento e Mapeamento para Prioridade ESUP ---
