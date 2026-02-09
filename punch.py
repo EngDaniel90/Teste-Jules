@@ -12,7 +12,7 @@ import tempfile
 
 # openpyxl imports
 import openpyxl
-from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.worksheet.table import Table, TableStyleInfo, TableColumn
 from openpyxl.utils import get_column_letter
 
 # Importação para comunicação com Outlook Local
@@ -630,6 +630,13 @@ class AutomacaoPunchList:
                                         if not os.path.exists(pasta_destino):
                                             os.makedirs(pasta_destino)
 
+                                        # Tenta remover o arquivo existente para evitar conflitos de sincronização
+                                        if os.path.exists(caminho_final):
+                                            try:
+                                                os.remove(caminho_final)
+                                            except Exception:
+                                                pass # Se falhar (ex: aberto), o copy2 tentará sobrescrever
+
                                         shutil.copy2(temp_path, caminho_final)
                                         self.registrar_log(f"SUCESSO: Planilha salva em: {caminho_final}")
                                     except PermissionError:
@@ -701,9 +708,10 @@ class AutomacaoPunchList:
             for col_idx, new_header_text in enumerate(novos_headers, 1):
                 sheet.cell(row=1, column=col_idx, value=new_header_text)
 
-            # Cria a nova tabela
+            # Cria a nova tabela com colunas explícitas para evitar corrupção
+            table_columns = [TableColumn(name=h) for h in novos_headers]
             referencia = f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
-            tab = Table(displayName="Tabela_query", ref=referencia)
+            tab = Table(displayName="Tabela_query", ref=referencia, tableColumns=table_columns)
             tab.tableStyleInfo = estilo
             sheet.add_table(tab)
 
