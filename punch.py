@@ -502,8 +502,8 @@ class AutomacaoPunchList:
             return "Coluna"
         if not isinstance(header_text, str):
             header_text = str(header_text)
-        # Remove caracteres inválidos para nomes de tabelas/cabeçalhos do Excel
-        invalid_chars = r'[\[\]/\\*?:\']'
+        # Remove caracteres inválidos para nomes de tabelas/cabeçalhos do Excel (incluindo # e @ para referências estruturadas)
+        invalid_chars = r'[\[\]/\\*?:\'#@]'
         sanitized = re.sub(invalid_chars, '', header_text)
         if not sanitized.strip():
             return "Coluna"
@@ -686,23 +686,23 @@ class AutomacaoPunchList:
             if "Tabela_query" in sheet.tables:
                 del sheet.tables["Tabela_query"]
 
-            # --- Lógica de Limpeza e Desduplicação de Cabeçalho ---
+            # --- Lógica de Limpeza e Desduplicação de Cabeçalho (Case-Insensitive) ---
             headers = [cell.value for cell in sheet[1]]
             novos_headers = []
-            seen_headers = set()
+            seen_headers_lower = set()
 
             for header in headers:
                 sanitized = self._sanitize_header(header)
 
-                # Garante unicidade
+                # Garante unicidade (Excel treats 'Header' and 'header' as duplicate)
                 final_header = sanitized
                 counter = 2
-                while final_header in seen_headers:
+                while final_header.lower() in seen_headers_lower:
                     final_header = f"{sanitized}_{counter}"
                     counter += 1
 
                 novos_headers.append(final_header)
-                seen_headers.add(final_header)
+                seen_headers_lower.add(final_header.lower())
 
             # Escreve os cabeçalhos limpos de volta na planilha
             for col_idx, new_header_text in enumerate(novos_headers, 1):
