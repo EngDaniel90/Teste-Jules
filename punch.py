@@ -709,7 +709,7 @@ class AutomacaoPunchList:
                 sheet.cell(row=1, column=col_idx, value=new_header_text)
 
             # Cria a nova tabela com colunas explícitas para evitar corrupção
-            table_columns = [TableColumn(name=h) for h in novos_headers]
+            table_columns = [TableColumn(id=i+1, name=h) for i, h in enumerate(novos_headers)]
             referencia = f"A1:{get_column_letter(sheet.max_column)}{sheet.max_row}"
             tab = Table(displayName="Tabela_query", ref=referencia, tableColumns=table_columns)
             tab.tableStyleInfo = estilo
