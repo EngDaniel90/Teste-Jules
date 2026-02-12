@@ -1,29 +1,174 @@
-import pandas as pd
+"""
+Este script automatiza o processo de geração e envio de relatórios de status
+para a Punch List do Design Review do DR90.
+
+O script executa os seguintes fluxos principais:
+1.  **Relatório Principal (Topside):** Processa a planilha principal, gera um
+    dashboard com os status, cria planilhas de ação para as equipes de
+    Operação e Engenharia (ESUP), e envia um e-mail consolidado para o canal
+    do Teams.
+2.  **E-mail para Julius:** Entre 7h e 9h, envia um e-mail de ação específico
+    para o Julius com os itens que a Operação já aprovou e que aguardam o
+    fechamento final.
+3.  **Relatório E-House:** Processa a planilha de pendências da E-House,
+    gera um gráfico de status e envia um e-mail para o canal do Teams.
+4.  **Relatório Vendors:** Processa a planilha de pendências de Fornecedores
+    (Vendors), gera um dashboard de status e envia um e-mail para o canal
+    do Teams.
+
+O script utiliza as bibliotecas pandas para manipulação de dados, matplotlib e
+seaborn para a geração de gráficos, e win32com para a automação do envio de
+e-mails via Outlook.
+"""
+import os
 import traceback
 from datetime import datetime
-import win32com.client as win32
-import matplotlib.pyplot as plt
-import seaborn as sns
-import os
 
-# --- CONFIGURAÇÕES DE CAMINHOS E URLs ---
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+import win32com.client as win32
+
+# --- CONFIGURAÇÕES GLOBAIS ---
+
+# --- Caminhos para os arquivos de entrada (planilhas) ---
 PATH_PUNCH = r'C:\Users\E797\Downloads\Teste mensagem e print\Punch_DR90_TS.xlsx'
 PATH_RDS = r'C:\Users\E797\Downloads\Teste mensagem e print\RDs\RDs.xlsx'
+PATH_EHOUSE_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_E-House.xlsx"
+PATH_VENDORS_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_Vendors.xlsx"
+
+# --- Caminhos para os arquivos de saída (gráficos e planilhas de ação) ---
 PATH_DASHBOARD_IMG = r'C:\Users\E797\Downloads\Teste mensagem e print\dashboard_status.png'
 PATH_OP_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\Operation to check.xlsx'
 PATH_ESUP_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\ESUP to check.xlsx'
 PATH_JULIUS_CHECK = r'C:\Users\E797\Downloads\Teste mensagem e print\Julius to check.xlsx'
-PATH_EHOUSE_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_E-House.xlsx"
 PATH_EHOUSE_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\ehouse_status_graph.png"
-PATH_VENDORS_PUNCH = r"C:\Users\E797\PETROBRAS\SRGE SI-II SCP85 ES - Planilha_BI_Punches\Punch_DR90_Vendors.xlsx"
 PATH_VENDORS_GRAPH = r"C:\Users\E797\Downloads\Teste mensagem e print\vendors_status_graph.png"
-EMAIL_DESTINO = "658b4ef7.petrobras.com.br@br.teams.ms"
+
+# --- Endereços de E-mail ---
+EMAIL_DESTINO_TEAMS = "658b4ef7.petrobras.com.br@br.teams.ms"
 EMAIL_JULIUS = "julius.lorzales.prestserv@petrobras.com.br"
+
+
+def log_message(message):
+    """Gera uma mensagem de log padronizada com timestamp."""
+    return f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {message}"
+
+
+# --- FUNÇÕES DE PROCESSAMENTO DE DADOS ---
+
+def processar_dados_topside():
+    """
+    Carrega e processa a planilha principal (Topside) para extrair métricas.
+    """
+    log = []
+    try:
+        if not os.path.exists(PATH_PUNCH):
+            raise FileNotFoundError(f"Arquivo Topside não encontrado: {PATH_PUNCH}")
+        if not os.path.exists(PATH_RDS):
+            raise FileNotFoundError(f"Arquivo de RDs não encontrado: {PATH_RDS}")
+
+        df = pd.read_excel(PATH_PUNCH)
+        df.columns = df.columns.str.strip()
+        df_rds = pd.read_excel(PATH_RDS)
+        df_rds.columns = df_rds.columns.str.strip()
+
+        log.append(log_message("Planilhas Topside e RDs carregadas com sucesso."))
+        hoje = datetime.now()
+
+        # Filtro principal: Itens com status 'Pending PB Reply'
+        pending_pb_reply = df[df['Status'].str.strip() == 'Pending PB Reply'].copy()
+
+        # --- Cálculos e Métricas ---
+        status_counts = df['Status'].value_counts().to_dict()
+        disciplina_status = pending_pb_reply['Petrobras Discipline'].value_counts().to_dict()
+
+        # Itens que dependem da resposta da Operação
+        mask_op_reply = (pending_pb_reply['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
+                        (pending_pb_reply['Petrobras Operation accept closing? (Y/N)'].isna())
+        df_pending_op = pending_pb_reply[mask_op_reply].copy()
+        count_pending_op_reply = len(df_pending_op)
+
+        # Itens com prazo de Operação vencido
+        df_pending_op['Petrobras Operation Target Date'] = pd.to_datetime(
+            df_pending_op['Petrobras Operation Target Date'], dayfirst=True, errors='coerce')
+        mask_op_overdue = (df_pending_op['Petrobras Operation Target Date'] < hoje) & \
+                          (df_pending_op['Date Cleared by Petrobras Operation'].isna())
+        count_op_overdue = len(df_pending_op[mask_op_overdue])
+
+        # Itens com prazo de ESUP vencido
+        pending_pb_reply['Petrobras Target Date'] = pd.to_datetime(
+            pending_pb_reply['Petrobras Target Date'], dayfirst=True, errors='coerce')
+        df_esup_overdue = pending_pb_reply[pending_pb_reply['Petrobras Target Date'] < hoje].copy()
+        count_esup_overdue = len(df_esup_overdue)
+
+        # Relacionamento entre prazos vencidos de ESUP e Operação
+        overdue_esup_dep_op = df_esup_overdue[df_esup_overdue.index.isin(df_pending_op.index)]
+        count_esup_dep_op = len(overdue_esup_dep_op)
+        count_esup_indep_op = count_esup_overdue - count_esup_dep_op
+
+        # Contagem de itens avaliados pela Operação
+        mask_op_group = df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])
+        resp_op_group = len(df[mask_op_group & df['Date Cleared by Petrobras Operation'].notna()])
+
+        mask_eng_group = df['Punched by  (Group)'] == 'PB - Engineering'
+        resp_eng_by_op = len(df[mask_eng_group & df['Date Cleared by Petrobras Operation'].notna()])
+
+        # Mapeamento de RDs para menção no e-mail
+        disciplinas_pendentes = pending_pb_reply['Petrobras Discipline'].unique()
+        mencoes_rds = {f"@{nome}" for disc in disciplinas_pendentes
+                       for nome in df_rds[df_rds.iloc[:, 0] == disc].iloc[0, 1:4].dropna().tolist()}
+
+        # --- Geração de DataFrames para Ação ---
+        # Ação: Operação precisa responder
+        df_op_check = df[(df['Status'].str.strip() == 'Pending PB Reply') &
+                         (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) &
+                         (df['Date Cleared by Petrobras Operation'].isna())].copy()
+
+        # Ação: ESUP pode responder (prazo da operação vencido ou operação recusou)
+        mask_esup_p1 = (df['Status'].str.strip() == 'Pending PB Reply') & \
+                       (df['Punched by  (Group)'] == 'PB - Engineering') & \
+                       (pd.to_datetime(df['Petrobras Operation Target Date'], dayfirst=True, errors='coerce') < hoje)
+        mask_esup_p2 = (df['Status'].str.strip() == 'Pending PB Reply') & \
+                       (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
+                       (df['Petrobras Operation accept closing? (Y/N)'] == False)
+        df_esup_check = pd.concat([df[mask_esup_p1], df[mask_esup_p2]]).drop_duplicates().reset_index(drop=True)
+
+        # Ação: Julius precisa fechar (operação aceitou)
+        mask_julius = (df['Status'].str.strip() == 'Pending PB Reply') & \
+                      (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
+                      (df['Petrobras Operation accept closing? (Y/N)'] == True)
+        df_julius_check = df[mask_julius].copy()
+
+        resultados = {
+            "total_punches": len(df),
+            "status_counts": status_counts,
+            "disciplina_status": disciplina_status,
+            "pending_op_reply": count_pending_op_reply,
+            "op_overdue": count_op_overdue,
+            "esup_overdue": count_esup_overdue,
+            "esup_dep_op": count_esup_dep_op,
+            "esup_indep_op": count_esup_indep_op,
+            "resp_op_total": resp_op_group,
+            "resp_eng_by_op": resp_eng_by_op,
+            "mencoes_rds": " ".join(sorted(list(mencoes_rds))),
+            "df_op_check": df_op_check,
+            "df_esup_check": df_esup_check,
+            "df_julius_check": df_julius_check
+        }
+
+        log.append(log_message("Processamento de dados Topside concluído."))
+        return resultados, log, True
+
+    except Exception as e:
+        erro_detalhado = traceback.format_exc()
+        log.append(f"ERRO CRÍTICO no processamento Topside: {str(e)}\n{erro_detalhado}")
+        return None, log, False
 
 
 def processar_dados_ehouse():
     """
-    Processa os dados da planilha E-House para o relatório específico.
+    Carrega e processa a planilha de pendências da E-House.
     """
     log = []
     try:
@@ -40,18 +185,18 @@ def processar_dados_ehouse():
             "total_pending": len(pending_petrobras),
             "disciplina_counts": disciplina_counts
         }
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processamento de dados E-House concluído.")
+        log.append(log_message("Processamento de dados E-House concluído."))
         return resultados, log, True
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
-        log.append(f"ERRO CRÍTICO no processamento de dados E-House: {str(e)}\n{erro_detalhado}")
+        log.append(f"ERRO CRÍTICO no processamento E-House: {str(e)}\n{erro_detalhado}")
         return None, log, False
 
 
 def processar_dados_vendors():
     """
-    Processa os dados da planilha de Vendors para o relatório específico.
+    Carrega e processa a planilha de pendências de Fornecedores (Vendors).
     """
     log = []
     try:
@@ -69,191 +214,70 @@ def processar_dados_vendors():
             "disciplina_counts": disciplina_counts,
             "total_punches": len(df_vendors)
         }
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processamento de dados de Vendors concluído.")
+        log.append(log_message("Processamento de dados de Vendors concluído."))
         return resultados, log, True
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
-        log.append(f"ERRO CRÍTICO no processamento de dados de Vendors: {str(e)}\n{erro_detalhado}")
+        log.append(f"ERRO CRÍTICO no processamento de Vendors: {str(e)}\n{erro_detalhado}")
         return None, log, False
 
 
-def processar_dados():
+# --- FUNÇÕES DE GERAÇÃO DE GRÁFICOS ---
+
+def setup_plot_style():
+    """Configura o estilo padrão para os gráficos."""
+    sns.set_style("whitegrid")
+    plt.rcParams['font.family'] = 'sans-serif'
+    plt.rcParams['font.sans-serif'] = 'Calibri'
+
+
+def annotate_bars(ax, is_horizontal=False):
+    """Adiciona anotações de valor às barras de um gráfico."""
+    for p in ax.patches:
+        if is_horizontal:
+            ax.annotate(f' {int(p.get_width())}', (p.get_width(), p.get_y() + p.get_height() / 2.),
+                        ha='left', va='center', fontsize=12, color='black')
+        else:
+            ax.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()),
+                        ha='center', va='center', fontsize=14, color='black', xytext=(0, 10),
+                        textcoords='offset points')
+
+
+def gerar_dashboard_topside(dados):
     """
-    Carrega os dados das planilhas, processa as métricas e retorna um dicionário com os resultados.
-    """
-    log = []
-    try:
-        # 1. Carregamento e Validação dos Arquivos
-        if not os.path.exists(PATH_PUNCH):
-            raise FileNotFoundError(f"Arquivo não encontrado: {PATH_PUNCH}")
-        if not os.path.exists(PATH_RDS):
-            raise FileNotFoundError(f"Arquivo não encontrado: {PATH_RDS}")
-
-        df = pd.read_excel(PATH_PUNCH)
-        df.columns = df.columns.str.strip()
-
-        df_rds = pd.read_excel(PATH_RDS)
-        df_rds.columns = df_rds.columns.str.strip()
-
-        hoje = datetime.now()
-        log.append(f"[{hoje.strftime('%Y-%m-%d %H:%M:%S')}] Planilhas carregadas com sucesso.")
-
-        # 2. Contagem de Status Geral
-        status_counts = df['Status'].value_counts().to_dict()
-
-        # 3. Disciplina x Status (Pending PB Reply)
-        pending_pb_reply = df[df['Status'].str.strip() == 'Pending PB Reply'].copy()
-        disciplina_status = pending_pb_reply['Petrobras Discipline'].value_counts().to_dict()
-
-        # 4. Pending Operation Reply
-        mask_op_reply = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                        (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
-                        (df['Petrobras Operation accept closing? (Y/N)'].isna())
-        df_pending_op = df[mask_op_reply].copy()
-        count_pending_op_reply = len(df_pending_op)
-
-        # 5. Petrobras Operation Overdue
-        df_pending_op['Petrobras Operation Target Date'] = pd.to_datetime(
-            df_pending_op['Petrobras Operation Target Date'], dayfirst=True, errors='coerce')
-
-        mask_op_overdue = (df_pending_op['Petrobras Operation Target Date'] < hoje) & \
-                          (df_pending_op['Date Cleared by Petrobras Operation'].isna())
-        count_op_overdue = len(df_pending_op[mask_op_overdue])
-
-        # 6. Petrobras ESUP Overdue
-        pending_pb_reply['Petrobras Target Date'] = pd.to_datetime(
-            pending_pb_reply['Petrobras Target Date'], dayfirst=True, errors='coerce')
-
-        df_esup_overdue = pending_pb_reply[pending_pb_reply['Petrobras Target Date'] < hoje].copy()
-        count_esup_overdue = len(df_esup_overdue)
-
-        # 7. Relacionamento ESUP x Operação
-        overdue_esup_dep_op = df_esup_overdue[df_esup_overdue.index.isin(df_pending_op.index)]
-        count_esup_dep_op = len(overdue_esup_dep_op)
-        count_esup_indep_op = count_esup_overdue - count_esup_dep_op
-
-        # 8. Grupos de Avaliação
-        mask_op_group = df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])
-        resp_op_group = len(df[mask_op_group & df['Date Cleared by Petrobras Operation'].notna()])
-
-        mask_eng_group = df['Punched by  (Group)'] == 'PB - Engineering'
-        resp_eng_by_op = len(df[mask_eng_group & df['Date Cleared by Petrobras Operation'].notna()])
-
-        # 9. Mapeamento de RDs para Menção (@)
-        disciplinas_pendentes = pending_pb_reply['Petrobras Discipline'].unique()
-        mencoes_rds = []
-        for disc in disciplinas_pendentes:
-            row = df_rds[df_rds.iloc[:, 0] == disc]
-            if not row.empty:
-                nomes = row.iloc[0, 1:4].dropna().tolist()
-                for nome in nomes:
-                    mencoes_rds.append(f"@{nome}")
-
-        # --- 10. Geração de Dataframes para Planilhas ---
-
-        # Itens pendentes de resposta OBRIGATÓRIA da operação
-        mask_op_check = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                        (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
-                        (df['Date Cleared by Petrobras Operation'].isna())
-        df_op_check = df[mask_op_check].copy()
-
-        # Itens para ESUP checar (Parte 1: Engenharia com prazo de operação vencido)
-        mask_esup_p1 = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                       (df['Punched by  (Group)'] == 'PB - Engineering') & \
-                       (pd.to_datetime(df['Petrobras Operation Target Date'], dayfirst=True, errors='coerce') < hoje)
-        df_esup_p1 = df[mask_esup_p1].copy()
-
-        # Itens para ESUP checar (Parte 2: Operação respondeu 'False')
-        mask_esup_p2 = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                       (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
-                       (df['Petrobras Operation accept closing? (Y/N)'] == False)
-        df_esup_p2 = df[mask_esup_p2].copy()
-
-        df_esup_check = pd.concat([df_esup_p1, df_esup_p2]).drop_duplicates().reset_index(drop=True)
-
-        # Itens para Julius checar (Operação respondeu 'True')
-        mask_julius = (df['Status'].str.strip() == 'Pending PB Reply') & \
-                      (df['Punched by  (Group)'].isin(['PB - Operation', 'SEA/KBR'])) & \
-                      (df['Petrobras Operation accept closing? (Y/N)'] == True)
-        df_julius_check = df[mask_julius].copy()
-
-        # --- Consolidação dos Resultados ---
-        resultados = {
-            "total_punches": len(df),
-            "status_counts": status_counts,
-            "disciplina_status": disciplina_status,
-            "pending_op_reply": count_pending_op_reply,
-            "op_overdue": count_op_overdue,
-            "esup_overdue": count_esup_overdue,
-            "esup_dep_op": count_esup_dep_op,
-            "esup_indep_op": count_esup_indep_op,
-            "resp_op_total": resp_op_group,
-            "resp_eng_by_op": resp_eng_by_op,
-            "mencoes_rds": " ".join(sorted(list(set(mencoes_rds)))),
-            "df_op_check": df_op_check,
-            "df_esup_check": df_esup_check,
-            "df_julius_check": df_julius_check
-        }
-
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Processamento de dados concluído.")
-        return resultados, log, True
-
-    except Exception as e:
-        erro_detalhado = traceback.format_exc()
-        log.append(f"ERRO CRÍTICO no processamento de dados: {str(e)}\n{erro_detalhado}")
-        return None, log, False
-
-
-def gerar_dashboard_imagem(dados):
-    """
-    Gera uma imagem de dashboard com os principais indicadores usando Matplotlib e Seaborn.
+    Gera a imagem do dashboard para o relatório Topside.
     """
     log = []
     try:
-        total_punches = dados['total_punches']
-        pending_reply = dados['status_counts'].get('Pending PB Reply', 0)
-        disciplinas = dados['disciplina_status']
-
-        # --- Configurações Visuais ---
-        sns.set_style("whitegrid")
-        plt.rcParams['font.family'] = 'sans-serif'
-        plt.rcParams['font.sans-serif'] = 'Calibri'
-
+        setup_plot_style()
         cor_principal = "#004488"
         cor_destaque = "#ff8c00"
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 2]})
         fig.suptitle('Status Report - Design Review TS', fontsize=24, fontweight='bold', color=cor_principal)
 
-        # --- Gráfico 1: Barras Verticais (Total vs. Pendente) ---
+        # Gráfico 1: Visão Geral
         ax1.set_title('Visão Geral dos Itens', fontsize=16, fontweight='bold')
-        sns.barplot(x=['Total de Itens', 'Pendentes (PB)'], y=[total_punches, pending_reply],
-                    palette=[cor_principal, cor_destaque], ax=ax1, width=0.5, hue=['Total de Itens', 'Pendentes (PB)'],
-                    legend=False)
+        sns.barplot(x=['Total de Itens', 'Pendentes (PB)'],
+                    y=[dados['total_punches'], dados['status_counts'].get('Pending PB Reply', 0)],
+                    palette=[cor_principal, cor_destaque], ax=ax1, width=0.5,
+                    hue=['Total de Itens', 'Pendentes (PB)'], legend=False)
         ax1.set_ylabel('Quantidade', fontsize=12)
         ax1.grid(axis='y', linestyle='--', alpha=0.7)
+        annotate_bars(ax1)
 
-        for p in ax1.patches:
-            ax1.annotate(f'{int(p.get_height())}',
-                         (p.get_x() + p.get_width() / 2., p.get_height()),
-                         ha='center', va='center', fontsize=14, color='black', xytext=(0, 10),
-                         textcoords='offset points')
-
-        # --- Gráfico 2: Barras Horizontais (Pendências por Disciplina) ---
+        # Gráfico 2: Pendências por Disciplina
+        disciplinas = dados['disciplina_status']
         if disciplinas:
             disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
-            nomes_disciplinas = [item[0] for item in disciplinas_sorted]
-            valores_disciplinas = [item[1] for item in disciplinas_sorted]
-
+            nomes = [item[0] for item in disciplinas_sorted]
+            valores = [item[1] for item in disciplinas_sorted]
             ax2.set_title('Pendências por Disciplina', fontsize=16, fontweight='bold')
-            sns.barplot(x=valores_disciplinas, y=nomes_disciplinas, palette="viridis", ax=ax2, orient='h',
-                        hue=nomes_disciplinas, legend=False)
+            sns.barplot(x=valores, y=nomes, palette="viridis", ax=ax2, orient='h', hue=nomes, legend=False)
             ax2.set_xlabel('Quantidade de Itens Pendentes', fontsize=12)
             ax2.grid(axis='x', linestyle='--', alpha=0.7)
-
-            for index, value in enumerate(valores_disciplinas):
-                ax2.text(value, index, f' {value}', va='center', fontsize=12, color='black')
+            annotate_bars(ax2, is_horizontal=True)
         else:
             ax2.set_title('Nenhuma Pendência por Disciplina', fontsize=16, fontweight='bold')
             ax2.text(0.5, 0.5, 'Sem dados para exibir', ha='center', va='center', fontsize=14)
@@ -263,57 +287,44 @@ def gerar_dashboard_imagem(dados):
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(PATH_DASHBOARD_IMG, dpi=200, bbox_inches='tight')
         plt.close()
-
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dashboard gerado com sucesso.")
+        log.append(log_message("Dashboard Topside gerado com sucesso."))
         return True, log
 
     except Exception as e:
         erro_detalhado = traceback.format_exc()
-        log.append(f"ERRO CRÍTICO ao gerar dashboard: {str(e)}\n{erro_detalhado}")
+        log.append(f"ERRO CRÍTICO ao gerar dashboard Topside: {str(e)}\n{erro_detalhado}")
         return False, log
 
 
 def gerar_grafico_ehouse(dados):
     """
-    Gera um gráfico de barras vertical para o status de E-House.
+    Gera o gráfico de barras para o relatório E-House.
     """
     log = []
     try:
-        disciplinas = dados['disciplina_counts']
+        disciplinas = dados.get('disciplina_counts')
         if not disciplinas:
-            log.append("Nenhum dado de E-House para gerar gráfico.")
-            return True, log  # Não é um erro, apenas não há o que fazer
+            log.append("Nenhum dado 'Pending Petrobras' em E-House para gerar gráfico.")
+            return True, log
 
-        sns.set_style("whitegrid")
-        plt.rcParams['font.family'] = 'sans-serif'
-        plt.rcParams['font.sans-serif'] = 'Calibri'
-
-        cor_principal = "#0072B2"  # Um azul diferente para distinguir
-
+        setup_plot_style()
         plt.figure(figsize=(12, 8))
 
         disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
-        nomes_disciplinas = [item[0] for item in disciplinas_sorted]
-        valores_disciplinas = [item[1] for item in disciplinas_sorted]
+        nomes = [item[0] for item in disciplinas_sorted]
+        valores = [item[1] for item in disciplinas_sorted]
 
-        ax = sns.barplot(x=nomes_disciplinas, y=valores_disciplinas, palette="Blues_r")
-
+        ax = sns.barplot(x=nomes, y=valores, palette="Blues_r")
         ax.set_title('Status Punch E-House: Pendentes Petrobras por Disciplina', fontsize=18, fontweight='bold')
         ax.set_xlabel('Disciplina', fontsize=12, fontweight='bold')
         ax.set_ylabel('Quantidade de Itens', fontsize=12, fontweight='bold')
         plt.xticks(rotation=45, ha='right')
-
-        for p in ax.patches:
-            ax.annotate(f'{int(p.get_height())}',
-                        (p.get_x() + p.get_width() / 2., p.get_height()),
-                        ha='center', va='center', fontsize=11, color='black', xytext=(0, 5),
-                        textcoords='offset points')
+        annotate_bars(ax)
 
         plt.tight_layout()
         plt.savefig(PATH_EHOUSE_GRAPH, dpi=200, bbox_inches='tight')
         plt.close()
-
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Gráfico E-House gerado com sucesso.")
+        log.append(log_message("Gráfico E-House gerado com sucesso."))
         return True, log
 
     except Exception as e:
@@ -322,116 +333,50 @@ def gerar_grafico_ehouse(dados):
         return False, log
 
 
-def enviar_email_ehouse(dados):
-    """
-    Envia um e-mail de status específico para a punch list E-House.
-    """
-    if dados is None or dados.get("total_pending", 0) == 0:
-        print(
-            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Nenhum item 'Pending Petrobras' no E-House. E-mail não enviado.")
-        return
-
-    try:
-        outlook = win32.Dispatch('outlook.application')
-        mail = outlook.CreateItem(0)
-        mail.Importance = 2
-        mail.To = EMAIL_DESTINO
-        mail.Subject = f"Status Report: Punch List DR90 E-House - {datetime.now().strftime('%d/%m/%Y')}"
-
-        disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
-
-        mail.HTMLBody = f"""
-        <html lang="pt-BR">
-        <head>
-            <style>
-                body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
-                p {{ margin: 10px 0; }}
-                .highlight {{ color: #c00000; font-weight: bold; }}
-                .mention {{ font-weight: bold; color: #005a9e; }}
-            </style>
-        </head>
-        <body>
-            <p class="mention">@Acompanhamento Design Review TS</p>
-            <p>Prezados,</p>
-            <p>Segue a atualização de status da <b>Punch List E-House</b>:</p>
-
-            <p>Atualmente, temos <span class="highlight">{dados['total_pending']}</span> itens com status <b>Pending Petrobras</b>.</p>
-
-            <p><b>Detalhamento por Disciplina:</b></p>
-            <ul>{disciplinas_html}</ul>
-
-            <p><i>O gráfico de status está anexado a este e-mail.</i></p>
-            <p>Atenciosamente,</p>
-            <p><b>Daniel Alves Anversi - Digital Engineering</b></p>
-        </body>
-        </html>
-        """
-
-        if os.path.exists(PATH_EHOUSE_GRAPH):
-            mail.Attachments.Add(PATH_EHOUSE_GRAPH)
-
-        mail.Send()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de status E-House enviado com sucesso.")
-
-    except Exception as e:
-        erro_detalhado = traceback.format_exc()
-        print(f"ERRO CRÍTICO ao enviar e-mail de E-House: {str(e)}\n{erro_detalhado}")
-
-
 def gerar_dashboard_vendors(dados):
     """
-    Gera uma imagem de dashboard para o status de Vendors.
+    Gera a imagem do dashboard para o relatório de Vendors.
     """
     log = []
     try:
-        total_punches = dados['total_punches']
-        pending_reply = dados.get('total_pending', 0)
-        disciplinas = dados['disciplina_counts']
-
-        sns.set_style("whitegrid")
-        plt.rcParams['font.family'] = 'sans-serif'
-        plt.rcParams['font.sans-serif'] = 'Calibri'
-
-        cor_principal = "#2E8B57"  # Verde Mar
-        cor_destaque = "#FFD700"  # Dourado
+        setup_plot_style()
+        cor_principal = "#2E8B57"
+        cor_destaque = "#FFD700"
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8), gridspec_kw={'width_ratios': [1, 2]})
         fig.suptitle('Status Report - Vendor Packages DR90', fontsize=24, fontweight='bold', color=cor_principal)
 
+        # Gráfico 1: Visão Geral
         ax1.set_title('Visão Geral dos Itens', fontsize=16, fontweight='bold')
-        sns.barplot(x=['Total de Itens', 'Pendentes (PB)'], y=[total_punches, pending_reply],
-                    palette=[cor_principal, cor_destaque], ax=ax1, width=0.5, hue=['Total de Itens', 'Pendentes (PB)'],
-                    legend=False)
+        sns.barplot(x=['Total de Itens', 'Pendentes (PB)'],
+                    y=[dados['total_punches'], dados.get('total_pending', 0)],
+                    palette=[cor_principal, cor_destaque], ax=ax1, width=0.5,
+                    hue=['Total de Itens', 'Pendentes (PB)'], legend=False)
         ax1.set_ylabel('Quantidade', fontsize=12)
         ax1.grid(axis='y', linestyle='--', alpha=0.7)
+        annotate_bars(ax1)
 
-        for p in ax1.patches:
-            ax1.annotate(f'{int(p.get_height())}', (p.get_x() + p.get_width() / 2., p.get_height()),
-                         ha='center', va='center', fontsize=14, color='black', xytext=(0, 10),
-                         textcoords='offset points')
-
+        # Gráfico 2: Pendências por Disciplina
+        disciplinas = dados['disciplina_counts']
         if disciplinas:
             disciplinas_sorted = sorted(disciplinas.items(), key=lambda item: item[1], reverse=True)
-            nomes_disciplinas = [item[0] for item in disciplinas_sorted]
-            valores_disciplinas = [item[1] for item in disciplinas_sorted]
+            nomes = [item[0] for item in disciplinas_sorted]
+            valores = [item[1] for item in disciplinas_sorted]
             ax2.set_title('Pendências por Disciplina', fontsize=16, fontweight='bold')
-            sns.barplot(x=valores_disciplinas, y=nomes_disciplinas, palette="crest", ax=ax2, orient='h',
-                        hue=nomes_disciplinas, legend=False)
+            sns.barplot(x=valores, y=nomes, palette="crest", ax=ax2, orient='h', hue=nomes, legend=False)
             ax2.set_xlabel('Quantidade de Itens Pendentes', fontsize=12)
             ax2.grid(axis='x', linestyle='--', alpha=0.7)
-            for index, value in enumerate(valores_disciplinas):
-                ax2.text(value, index, f' {value}', va='center', fontsize=12, color='black')
+            annotate_bars(ax2, is_horizontal=True)
         else:
             ax2.set_title('Nenhuma Pendência por Disciplina', fontsize=16, fontweight='bold')
             ax2.text(0.5, 0.5, 'Sem dados para exibir', ha='center', va='center', fontsize=14)
-            ax2.set_xticks([]);
+            ax2.set_xticks([])
             ax2.set_yticks([])
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(PATH_VENDORS_GRAPH, dpi=200, bbox_inches='tight')
         plt.close()
-
-        log.append(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Dashboard de Vendors gerado com sucesso.")
+        log.append(log_message("Dashboard de Vendors gerado com sucesso."))
         return True, log
 
     except Exception as e:
@@ -440,306 +385,347 @@ def gerar_dashboard_vendors(dados):
         return False, log
 
 
-def enviar_email_vendors(dados):
-    """
-    Envia um e-mail de status específico para a punch list de Vendors.
-    """
-    if dados is None or dados.get("total_pending", 0) == 0:
-        print(
-            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Nenhum item 'Pending Petrobras' em Vendors. E-mail não enviado.")
-        return
+# --- FUNÇÕES DE ENVIO DE E-MAIL ---
 
+def enviar_email_outlook(to, subject, html_body, attachments=None, bcc=None, importance=2):
+    """
+    Função genérica para criar e enviar um e-mail via Outlook.
+    """
     try:
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
-        mail.Importance = 2
-        mail.To = EMAIL_DESTINO
-        mail.Subject = f"Status Report: Punch List DR90 Vendors - {datetime.now().strftime('%d/%m/%Y')}"
+        mail.To = to
+        if bcc:
+            mail.BCC = bcc
+        mail.Subject = subject
+        mail.HTMLBody = html_body
+        mail.Importance = importance  # 2 = Alta, 1 = Normal, 0 = Baixa
 
-        disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
-
-        mail.HTMLBody = f"""
-        <html lang="pt-BR">
-        <head>
-            <style>
-                body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
-                p {{ margin: 10px 0; }}
-                .highlight {{ color: #c00000; font-weight: bold; }}
-                .mention {{ font-weight: bold; color: #005a9e; }}
-            </style>
-        </head>
-        <body>
-            <p class="mention">@Acompanhamento Design Review TS</p>
-            <p>Prezados,</p>
-            <p>Segue a atualização de status da <b>Punch List de Vendors (Fornecedores)</b>:</p>
-
-            <p>Atualmente, temos <span class="highlight">{dados['total_pending']}</span> itens com status <b>Pending Petrobras</b>.</p>
-
-            <p><b>Detalhamento por Disciplina:</b></p>
-            <ul>{disciplinas_html}</ul>
-
-            <p><i>O dashboard de status está anexado a este e-mail.</i></p>
-            <p>Atenciosamente,</p>
-            <p><b>Daniel Alves Anversi - Digital Engineering</b></p>
-        </body>
-        </html>
-        """
-
-        if os.path.exists(PATH_VENDORS_GRAPH):
-            mail.Attachments.Add(PATH_VENDORS_GRAPH)
+        if attachments:
+            for attachment in attachments:
+                if os.path.exists(attachment):
+                    mail.Attachments.Add(attachment)
 
         mail.Send()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de status Vendors enviado com sucesso.")
-
+        print(log_message(f"E-mail '{subject}' enviado para {to}."))
+        return True
     except Exception as e:
         erro_detalhado = traceback.format_exc()
-        print(f"ERRO CRÍTICO ao enviar e-mail de Vendors: {str(e)}\n{erro_detalhado}")
+        print(f"ERRO CRÍTICO ao enviar e-mail '{subject}': {str(e)}\n{erro_detalhado}")
+        return False
 
 
-def enviar_email(dados, log_processo):
+def enviar_email_relatorio_topside(dados):
     """
-    Cria e envia um e-mail formatado com os dados do relatório e o log de execução.
+    Constrói e envia o e-mail do relatório principal (Topside).
     """
-    try:
-        outlook = win32.Dispatch('outlook.application')
+    subject = f"Status Report: Punch List DR90 TS - {datetime.now().strftime('%d/%m/%Y')}"
+    disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_status'].items()])
+    attachments = [PATH_DASHBOARD_IMG]
 
-        mail = outlook.CreateItem(0)
-        mail.Importance = 2
-        mail.To = EMAIL_DESTINO
-        mail.Subject = f"Status Report: Punch List DR90 TS - {datetime.now().strftime('%d/%m/%Y')}"
-
-        disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_status'].items()])
-
-        secao_op_check_html = ""
-        df_op_check = dados.get("df_op_check")
-        if df_op_check is not None and not df_op_check.empty:
-            df_op_check.to_excel(PATH_OP_CHECK, index=False)
-            mail.Attachments.Add(PATH_OP_CHECK)
-            secao_op_check_html = f"""
-            <div style="border: 2px solid red; padding: 10px; margin-top: 15px;">
-                <p><b style="color:red;">Ponto de Atenção - Operação:</b></p>
-                <p>Foram identificados <b>{len(df_op_check)}</b> itens que requerem uma ação necessária da equipe de Operação.
-                A planilha <i>'Operation to check.xlsx'</i>, anexada a este e-mail, contém o detalhamento completo.</p>
-            </div>
-            """
-
-        secao_esup_check_html = ""
-        df_esup_check = dados.get("df_esup_check")
-        if df_esup_check is not None and not df_esup_check.empty:
-            df_esup_check.to_excel(PATH_ESUP_CHECK, index=False)
-            mail.Attachments.Add(PATH_ESUP_CHECK)
-            secao_esup_check_html = f"""
-            <div style="border: 2px solid blue; padding: 10px; margin-top: 15px;">
-                <p><b style="color:blue;">Ponto de Atenção - ESUP (Engenharia):</b></p>
-                <p>Foram identificados <b>{len(df_esup_check)}</b> itens que agora podem ser respondidos pela equipe de Engenharia.
-                A planilha <i>'ESUP to check.xlsx'</i>, anexada a este e-mail, contém o detalhamento completo.</p>
-            </div>
-            """
-
-        mail.HTMLBody = f"""
-        <html lang="pt-BR">
-        <head>
-            <style>
-                body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
-                p {{ margin: 10px 0; }}
-                table {{ border-collapse: collapse; width: 80%; margin-top: 15px; border: 1px solid #ddd; }}
-                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-                th {{ background-color: #f2f2f2; font-weight: bold; }}
-                td.center {{ text-align: center; }}
-                .highlight {{ color: #c00000; font-weight: bold; }}
-                .mention {{ font-weight: bold; color: #005a9e; }}
-            </style>
-        </head>
-        <body>
-            <p class="mention">@Acompanhamento Design Review TS</p>
-            <p>Prezados,</p>
-            <p>Segue a atualização diária das pendências do <b>Design Review TS</b>:</p>
-
-            {secao_op_check_html}
-            {secao_esup_check_html}
-
-            <p>Atualmente, temos <span class="highlight">{dados['status_counts'].get('Pending PB Reply', 0)}</span> itens com status <b>Pending PB Reply</b>.</p>
-
-            <p><b>Detalhamento por Disciplina:</b></p>
-            <ul>{disciplinas_html}</ul>
-
-            <p><b>Atenção RDs:</b>
-<span class="mention">{dados['mencoes_rds']}</span></p>
-
-            <table>
-                <tr>
-                    <th>Indicador</th>
-                    <th>Quantidade</th>
-                </tr>
-                <tr><td>Itens Pendentes de Resposta da Operação (Pending Operation Reply)</td><td class="center">{dados['pending_op_reply']}</td></tr>
-                <tr><td>Itens com Prazo de Operação Vencido (Petrobras Operation Overdue)</td><td class="center">{dados['op_overdue']}</td></tr>
-                <tr><td>Itens com Prazo ESUP Vencido (Petrobras ESUP Overdue)</td><td class="center">{dados['esup_overdue']}</td></tr>
-                <tr><td>Overdue ESUP com Dependência da Operação</td><td class="center">{dados['esup_dep_op']}</td></tr>
-                <tr><td>Overdue ESUP sem Dependência da Operação</td><td class="center">{dados['esup_indep_op']}</td></tr>
-                <tr><td>Itens Mandatórios Avaliados pela Operação</td><td class="center">{dados['resp_op_total']}</td></tr>
-                <tr><td>Itens de Engenharia Avaliados pela Operação</td><td class="center">{dados['resp_eng_by_op']}</td></tr>
-            </table>
-
-            <p><i>O dashboard atualizado e as planilhas de ação (quando aplicável) estão anexados a este e-mail.</i></p>
-            <p>Atenciosamente,</p>
-            <p><b>Daniel Alves Anversi - Digital Engineering</b></p>
-        </body>
-        </html>
+    # Seção de Ação para Operação
+    secao_op_check_html = ""
+    df_op_check = dados.get("df_op_check")
+    if df_op_check is not None and not df_op_check.empty:
+        df_op_check.to_excel(PATH_OP_CHECK, index=False)
+        attachments.append(PATH_OP_CHECK)
+        secao_op_check_html = f"""
+        <div style="border: 2px solid red; padding: 10px; margin-top: 15px;">
+            <p><b style="color:red;">Ponto de Atenção - Operação:</b></p>
+            <p>Foram identificados <b>{len(df_op_check)}</b> itens que requerem uma ação da equipe de Operação.
+            A planilha <i>'Operation to check.xlsx'</i>, anexada, contém o detalhamento.</p>
+        </div>
         """
 
-        if os.path.exists(PATH_DASHBOARD_IMG):
-            mail.Attachments.Add(PATH_DASHBOARD_IMG)
+    # Seção de Ação para ESUP
+    secao_esup_check_html = ""
+    df_esup_check = dados.get("df_esup_check")
+    if df_esup_check is not None and not df_esup_check.empty:
+        df_esup_check.to_excel(PATH_ESUP_CHECK, index=False)
+        attachments.append(PATH_ESUP_CHECK)
+        secao_esup_check_html = f"""
+        <div style="border: 2px solid blue; padding: 10px; margin-top: 15px;">
+            <p><b style="color:blue;">Ponto de Atenção - ESUP (Engenharia):</b></p>
+            <p>Foram identificados <b>{len(df_esup_check)}</b> itens que podem ser respondidos pela Engenharia.
+            A planilha <i>'ESUP to check.xlsx'</i>, anexada, contém o detalhamento.</p>
+        </div>
+        """
 
-        mail.Send()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail principal enviado para {EMAIL_DESTINO}.")
-
-        log_mail = outlook.CreateItem(0)
-        log_mail.To = EMAIL_DESTINO
-        log_mail.Subject = f"Log de Execução (Sucesso) - Automação Punch List - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        log_mail.Body = f"Execução concluída com sucesso em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n" + "\n".join(
-            log_processo)
-        log_mail.Send()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de log de sucesso enviado.")
-
-    except Exception as e:
-        erro_detalhado = traceback.format_exc()
-        print(f"ERRO CRÍTICO ao enviar e-mail: {str(e)}\n{erro_detalhado}")
-
-
-def enviar_email_de_falha(log_processo):
+    html_body = f"""
+    <html lang="pt-BR">
+    <head>
+        <style>
+            body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
+            p {{ margin: 10px 0; }}
+            table {{ border-collapse: collapse; width: 80%; margin-top: 15px; border: 1px solid #ddd; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+            th {{ background-color: #f2f2f2; font-weight: bold; }}
+            td.center {{ text-align: center; }}
+            .highlight {{ color: #c00000; font-weight: bold; }}
+            .mention {{ font-weight: bold; color: #005a9e; }}
+        </style>
+    </head>
+    <body>
+        <p class="mention">@Acompanhamento Design Review TS</p>
+        <p>Prezados,</p>
+        <p>Segue a atualização diária das pendências do <b>Design Review TS</b>:</p>
+        {secao_op_check_html}
+        {secao_esup_check_html}
+        <p>Atualmente, temos <span class="highlight">{dados['status_counts'].get('Pending PB Reply', 0)}</span> itens com status <b>Pending PB Reply</b>.</p>
+        <p><b>Detalhamento por Disciplina:</b></p>
+        <ul>{disciplinas_html}</ul>
+        <p><b>Atenção RDs:</b> <span class="mention">{dados['mencoes_rds']}</span></p>
+        <table>
+            <tr><th>Indicador</th><th>Quantidade</th></tr>
+            <tr><td>Itens Pendentes de Resposta da Operação</td><td class="center">{dados['pending_op_reply']}</td></tr>
+            <tr><td>Itens com Prazo de Operação Vencido</td><td class="center">{dados['op_overdue']}</td></tr>
+            <tr><td>Itens com Prazo ESUP Vencido</td><td class="center">{dados['esup_overdue']}</td></tr>
+            <tr><td>Overdue ESUP com Dependência da Operação</td><td class="center">{dados['esup_dep_op']}</td></tr>
+            <tr><td>Overdue ESUP sem Dependência da Operação</td><td class="center">{dados['esup_indep_op']}</td></tr>
+            <tr><td>Itens Mandatórios Avaliados pela Operação</td><td class="center">{dados['resp_op_total']}</td></tr>
+            <tr><td>Itens de Engenharia Avaliados pela Operação</td><td class="center">{dados['resp_eng_by_op']}</td></tr>
+        </table>
+        <p><i>O dashboard atualizado e as planilhas de ação (quando aplicável) estão anexados.</i></p>
+        <p>Atenciosamente,<br><b>Daniel Alves Anversi - Digital Engineering</b></p>
+    </body>
+    </html>
     """
-    Envia um e-mail de notificação de falha com o log do erro.
-    """
-    try:
-        outlook = win32.Dispatch('outlook.application')
-        log_mail = outlook.CreateItem(0)
-        log_mail.To = EMAIL_DESTINO
-        log_mail.Subject = f"Log de Execução (FALHA) - Automação Punch List - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        log_mail.Body = (f"A automação falhou em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                         "Causa do Erro:\n" + "\n".join(log_processo))
-        log_mail.Send()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail de log de falha enviado.")
-    except Exception as e:
-        erro_detalhado = traceback.format_exc()
-        print(f"ERRO CRÍTICO ao tentar enviar o e-mail de falha: {str(e)}\n{erro_detalhado}")
+    enviar_email_outlook(to=EMAIL_DESTINO_TEAMS, subject=subject, html_body=html_body, attachments=attachments)
 
 
-def enviar_mensagem_julius(dados):
+def enviar_email_acao_julius(dados):
     """
-    Cria e envia um e-mail de ação específico para o Julius.
+    Constrói e envia o e-mail de ação para o Julius.
     """
     df_julius_check = dados.get("df_julius_check")
     if df_julius_check is None or df_julius_check.empty:
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Nenhum item para Julius. E-mail não enviado.")
+        print(log_message("Nenhum item para ação do Julius. E-mail não enviado."))
         return
 
-    try:
-        df_julius_check.to_excel(PATH_JULIUS_CHECK, index=False)
+    df_julius_check.to_excel(PATH_JULIUS_CHECK, index=False)
+    num_items = len(df_julius_check)
+    subject = f"Action Required: {num_items} Punch List Items for Closure - {datetime.now().strftime('%d/%m/%Y')}"
+    html_body = f"""
+    <html lang="en">
+    <head>
+        <style>
+            body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
+            p {{ margin: 10px 0; }}
+            .highlight {{ font-weight: bold; color: #004488; }}
+        </style>
+    </head>
+    <body>
+        <p>Dear Julius,</p>
+        <p>This is an automated notification regarding <span class="highlight">{num_items} punch list items</span> that have been approved by the Operation team and are now awaiting final closure.</p>
+        <p>Your action is required to proceed with the final verification for these items.</p>
+        <p>The detailed list is attached in the spreadsheet <i>'Julius to check.xlsx'</i> for your convenience.</p>
+        <p>Thank you for your attention to this matter.</p>
+        <p>Best regards,<br><b>Daniel Alves Anversi - Digital Engineering</b></p>
+    </body>
+    </html>
+    """
+    enviar_email_outlook(to=EMAIL_JULIUS, subject=subject, html_body=html_body,
+                           attachments=[PATH_JULIUS_CHECK], bcc=EMAIL_DESTINO_TEAMS)
 
+
+def enviar_email_relatorio_ehouse(dados):
+    """
+    Constrói e envia o e-mail do relatório da E-House.
+    """
+    if dados is None or dados.get("total_pending", 0) == 0:
+        print(log_message("Nenhum item 'Pending Petrobras' no E-House. E-mail não enviado."))
+        return
+
+    subject = f"Status Report: Punch List DR90 E-House - {datetime.now().strftime('%d/%m/%Y')}"
+    disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
+    html_body = f"""
+    <html lang="pt-BR">
+    <head>
+        <style>
+            body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
+            .highlight {{ color: #c00000; font-weight: bold; }}
+            .mention {{ font-weight: bold; color: #005a9e; }}
+        </style>
+    </head>
+    <body>
+        <p class="mention">@Acompanhamento Design Review TS</p>
+        <p>Prezados,</p>
+        <p>Segue a atualização de status da <b>Punch List E-House</b>:</p>
+        <p>Atualmente, temos <span class="highlight">{dados['total_pending']}</span> itens com status <b>Pending Petrobras</b>.</p>
+        <p><b>Detalhamento por Disciplina:</b></p>
+        <ul>{disciplinas_html}</ul>
+        <p><i>O gráfico de status está anexado.</i></p>
+        <p>Atenciosamente,<br><b>Daniel Alves Anversi - Digital Engineering</b></p>
+    </body>
+    </html>
+    """
+    enviar_email_outlook(to=EMAIL_DESTINO_TEAMS, subject=subject, html_body=html_body, attachments=[PATH_EHOUSE_GRAPH])
+
+
+def enviar_email_relatorio_vendors(dados):
+    """
+    Constrói e envia o e-mail do relatório de Vendors.
+    """
+    if dados is None or dados.get("total_pending", 0) == 0:
+        print(log_message("Nenhum item 'Pending Petrobras' em Vendors. E-mail não enviado."))
+        return
+
+    subject = f"Status Report: Punch List DR90 Vendors - {datetime.now().strftime('%d/%m/%Y')}"
+    disciplinas_html = "".join([f"<li><b>{k}:</b> {v}</li>" for k, v in dados['disciplina_counts'].items()])
+    html_body = f"""
+    <html lang="pt-BR">
+    <head>
+        <style>
+            body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
+            .highlight {{ color: #c00000; font-weight: bold; }}
+            .mention {{ font-weight: bold; color: #005a9e; }}
+        </style>
+    </head>
+    <body>
+        <p class="mention">@Acompanhamento Design Review TS</p>
+        <p>Prezados,</p>
+        <p>Segue a atualização da <b>Punch List de Vendors (Fornecedores)</b>:</p>
+        <p>Temos <span class="highlight">{dados['total_pending']}</span> itens com status <b>Pending Petrobras</b>.</p>
+        <p><b>Detalhamento por Disciplina:</b></p>
+        <ul>{disciplinas_html}</ul>
+        <p><i>O dashboard de status está anexado.</i></p>
+        <p>Atenciosamente,<br><b>Daniel Alves Anversi - Digital Engineering</b></p>
+    </body>
+    </html>
+    """
+    enviar_email_outlook(to=EMAIL_DESTINO_TEAMS, subject=subject, html_body=html_body, attachments=[PATH_VENDORS_GRAPH])
+
+
+def enviar_email_de_log(log_processo, is_falha=False):
+    """
+    Envia um e-mail com o log de execução (sucesso ou falha).
+    """
+    status = "FALHA" if is_falha else "Sucesso"
+    subject = f"Log de Execução ({status}) - Automação Punch List - {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    body = f"A automação {'falhou' if is_falha else 'foi concluída'} em: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    body += "Causa do Erro:\n" if is_falha else "Log de Execução:\n"
+    body += "\n".join(log_processo)
+
+    # Reutiliza a função genérica, mas envia como texto simples (sem HTML)
+    try:
         outlook = win32.Dispatch('outlook.application')
         mail = outlook.CreateItem(0)
-        mail.To = EMAIL_JULIUS
-        mail.BCC = EMAIL_DESTINO  # Adiciona o canal do Teams em cópia oculta
-        mail.Subject = f"Action Required: {len(df_julius_check)} Punch List Items for Closure - {datetime.now().strftime('%d/%m/%Y')}"
-        mail.Importance = 2
-
-        mail.HTMLBody = f"""
-        <html lang="en">
-        <head>
-            <style>
-                body {{ font-family: Calibri, sans-serif; font-size: 11pt; }}
-                p {{ margin: 10px 0; }}
-                .highlight {{ font-weight: bold; color: #004488; }}
-            </style>
-        </head>
-        <body>
-            <p>Dear Julius,</p>
-            <p>This is an automated notification regarding <span class="highlight">{len(df_julius_check)} punch list items</span> that have been approved by the Operation team and are now awaiting final closure.</p>
-            <p>Your action is required to proceed with the final verification for these items.</p>
-            <p>The detailed list is attached in the spreadsheet <i>'Julius to check.xlsx'</i> for your convenience.</p>
-            <p>Thank you for your attention to this matter.</p>
-            <p>Best regards,</p>
-            <p><b>Daniel Alves Anversi - Digital Engineering</b></p>
-        </body>
-        </html>
-        """
-        mail.Attachments.Add(PATH_JULIUS_CHECK)
+        mail.To = EMAIL_DESTINO_TEAMS
+        mail.Subject = subject
+        mail.Body = body
         mail.Send()
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] E-mail para Julius enviado com sucesso.")
-
+        print(log_message(f"E-mail de log de {status.lower()} enviado."))
     except Exception as e:
         erro_detalhado = traceback.format_exc()
-        print(f"ERRO CRÍTICO ao enviar e-mail para Julius: {str(e)}\n{erro_detalhado}")
+        print(f"ERRO CRÍTICO ao tentar enviar o e-mail de log de {status.lower()}: {str(e)}\n{erro_detalhado}")
+
+
+# --- FLUXOS DE EXECUÇÃO ---
+
+def run_fluxo_topside():
+    """Executa o fluxo completo para o relatório Topside."""
+    print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
+    dados, log, sucesso = processar_dados_topside()
+    if not sucesso:
+        print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
+        enviar_email_de_log(log, is_falha=True)
+        return None  # Retorna None para indicar falha
+
+    print("-> Dados Topside processados com sucesso.")
+    sucesso_dash, log_dash = gerar_dashboard_topside(dados)
+    log.extend(log_dash)
+
+    if not sucesso_dash:
+        print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
+        enviar_email_de_log(log, is_falha=True)
+        return None
+
+    print("-> Dashboard Topside gerado com sucesso.")
+    enviar_email_relatorio_topside(dados)
+    enviar_email_de_log(log)
+    return dados  # Retorna os dados para o fluxo do Julius
+
+
+def run_fluxo_julius(dados_topside):
+    """Executa o fluxo de envio de e-mail para o Julius, se aplicável."""
+    print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
+    hora_atual = datetime.now().hour
+    if not (7 <= hora_atual < 9):
+        print(f"-> Fora do horário agendado (executado às {hora_atual}h). E-mail para Julius não será enviado.")
+        return
+
+    if dados_topside is None:
+        print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
+        return
+
+    enviar_email_acao_julius(dados_topside)
+
+
+def run_fluxo_ehouse():
+    """Executa o fluxo completo para o relatório E-House."""
+    print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
+    try:
+        dados, log, sucesso = processar_dados_ehouse()
+        if not sucesso:
+            raise RuntimeError("Falha no processamento de dados E-House.")
+
+        print("-> Dados E-House processados com sucesso.")
+        sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados)
+        log.extend(log_grafico)
+
+        if not sucesso_grafico:
+            raise RuntimeError("Falha na geração do gráfico E-House.")
+
+        print("-> Gráfico E-House gerado com sucesso.")
+        enviar_email_relatorio_ehouse(dados)
+
+    except FileNotFoundError as e:
+        print(f"-> {e}. O relatório para este fluxo não será gerado.")
+    except Exception as e:
+        print(f"\n!!! FALHA CRÍTICA NO FLUXO E-HOUSE: {e} !!!")
+        enviar_email_de_log([str(e)], is_falha=True)
+
+
+def run_fluxo_vendors():
+    """Executa o fluxo completo para o relatório de Vendors."""
+    print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
+    try:
+        dados, log, sucesso = processar_dados_vendors()
+        if not sucesso:
+            raise RuntimeError("Falha no processamento de dados de Vendors.")
+
+        print("-> Dados de Vendors processados com sucesso.")
+        sucesso_dash, log_dash = gerar_dashboard_vendors(dados)
+        log.extend(log_dash)
+
+        if not sucesso_dash:
+            raise RuntimeError("Falha na geração do dashboard de Vendors.")
+
+        print("-> Dashboard de Vendors gerado com sucesso.")
+        enviar_email_relatorio_vendors(dados)
+
+    except FileNotFoundError as e:
+        print(f"-> {e}. O relatório para este fluxo não será gerado.")
+    except Exception as e:
+        print(f"\n!!! FALHA CRÍTICA NO FLUXO DE VENDORS: {e} !!!")
+        enviar_email_de_log([str(e)], is_falha=True)
 
 
 # --- EXECUÇÃO PRINCIPAL ---
-if __name__ == "__main__":
+def main():
+    """Função principal que orquestra a execução dos fluxos."""
     print(f"--- INICIANDO PROCESSO DE AUTOMAÇÃO GERAL ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
-    hora_atual = datetime.now().hour
 
-    # --- FLUXO 1: Relatório Principal (Topside) ---
-    print("\n--- [FLUXO 1/4] Processando Relatório Principal (Topside) ---")
-    dados_topside, log_topside, sucesso_topside = processar_dados()
-    if sucesso_topside:
-        print("-> Dados Topside processados com sucesso.")
-        sucesso_dashboard, log_dashboard = gerar_dashboard_imagem(dados_topside)
-        log_total_topside = log_topside + log_dashboard
-        if sucesso_dashboard:
-            print("-> Dashboard Topside gerado com sucesso.")
-        else:
-            print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD TOPSIDE !!!")
-        enviar_email(dados_topside, log_total_topside)
-    else:
-        print("\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS TOPSIDE !!!")
-        enviar_email_de_falha(log_topside)
+    # Fluxo 1 é crítico e seus dados são usados no Fluxo 2
+    dados_topside = run_fluxo_topside()
 
-    # --- FLUXO 2: E-mail para Julius ---
-    print("\n--- [FLUXO 2/4] Verificando E-mail para Julius ---")
-    if 7 <= hora_atual < 9:
-        if sucesso_topside:
-            enviar_mensagem_julius(dados_topside)
-        else:
-            print("-> O processamento de dados do Topside falhou, e-mail para Julius não pôde ser gerado.")
-    else:
-        print(f"-> Fora do horário agendado (executado às {hora_atual}h). E-mail para Julius não enviado.")
-
-    # --- FLUXO 3: Relatório E-House ---
-    print("\n--- [FLUXO 3/4] Processando Relatório E-House ---")
-    try:
-        dados_ehouse, log_ehouse, sucesso_ehouse = processar_dados_ehouse()
-        if sucesso_ehouse:
-            print("-> Dados E-House processados com sucesso.")
-            sucesso_grafico, log_grafico = gerar_grafico_ehouse(dados_ehouse)
-            if sucesso_grafico:
-                print("-> Gráfico E-House gerado com sucesso.")
-                enviar_email_ehouse(dados_ehouse)
-            else:
-                print("-> !!! FALHA NA GERAÇÃO DO GRÁFICO E-HOUSE !!!")
-                enviar_email_de_falha(log_ehouse + log_grafico)
-    except FileNotFoundError as e:
-        print(f"-> Arquivo E-House não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
-    except Exception as e:
-        print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS E-HOUSE: {e} !!!")
-        enviar_email_de_falha([str(e)])
-
-    # --- FLUXO 4: Relatório Vendors ---
-    print("\n--- [FLUXO 4/4] Processando Relatório Vendors ---")
-    try:
-        dados_vendors, log_vendors, sucesso_vendors = processar_dados_vendors()
-        if sucesso_vendors:
-            print("-> Dados de Vendors processados com sucesso.")
-            sucesso_grafico, log_grafico = gerar_dashboard_vendors(dados_vendors)
-            if sucesso_grafico:
-                print("-> Dashboard de Vendors gerado com sucesso.")
-                enviar_email_vendors(dados_vendors)
-            else:
-                print("-> !!! FALHA NA GERAÇÃO DO DASHBOARD DE VENDORS !!!")
-                enviar_email_de_falha(log_vendors + log_grafico)
-    except FileNotFoundError as e:
-        print(f"-> Arquivo de Vendors não encontrado. O relatório para este fluxo não será gerado. Erro: {e}")
-    except Exception as e:
-        print(f"\n!!! FALHA CRÍTICA NO PROCESSAMENTO DOS DADOS DE VENDORS: {e} !!!")
-        enviar_email_de_falha([str(e)])
+    # Outros fluxos são independentes
+    run_fluxo_julius(dados_topside)
+    run_fluxo_ehouse()
+    run_fluxo_vendors()
 
     print(f"\n--- PROCESSO DE AUTOMAÇÃO GERAL FINALIZADO ({datetime.now().strftime('%d/%m/%Y %H:%M:%S')}) ---")
- 
+
+
+if __name__ == "__main__":
+    main()
