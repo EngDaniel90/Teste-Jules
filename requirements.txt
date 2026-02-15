@@ -1,0 +1,10 @@
+pandas
+openpyxl
+matplotlib
+seaborn
+pywin32
+requests
+selenium
+schedule
+urllib3
+xlsxwriter
