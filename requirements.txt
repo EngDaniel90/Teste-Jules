@@ -1,0 +1,7 @@
+pandas
+selenium
+requests
+openpyxl
+urllib3
+webdriver-manager
+pywin32; sys_platform == 'win32'
