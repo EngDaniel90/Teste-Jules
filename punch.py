@@ -511,36 +511,85 @@ class AutomacaoPunchList:
         return sanitized[:255]
 
     def iniciar_sessao_navegador(self):
-        # O caminho fixo é mantido como fallback ou para referência, mas usamos o manager agora
+        # Configurações do Edge
         edge_options = Options()
         edge_options.add_argument("--ignore-certificate-errors")
 
+        # Configura proxy para webdriver_manager se estiver no ambiente
+        # Exemplo: set HTTP_PROXY=http://user:pass@host:port
+        # (O requests/urllib3 usado pelo manager geralmente respeita vars de ambiente)
+
+        service = None
+        driver_path = None
+
+        # 1. Tenta usar o webdriver-manager (Rede corporativa pode bloquear)
         try:
-            # Tenta usar o webdriver-manager para instalar a versão correta do driver
             self.registrar_log("Iniciando Edge Driver com webdriver-manager...")
-            service = EdgeService(EdgeChromiumDriverManager().install())
-            self.driver = webdriver.Edge(service=service, options=edge_options)
-            self.driver.get(URL_LOGIN_SEATRIUM)
+            driver_path = EdgeChromiumDriverManager().install()
+            self.registrar_log(f"Driver gerenciado instalado em: {driver_path}")
+            service = EdgeService(driver_path)
+        except Exception as e_manager:
+            self.registrar_log(f"AVISO: Falha no webdriver-manager (possível bloqueio de rede): {e_manager}")
 
-            self.registrar_log("Aguardando login na Seatrium...")
-            wait = WebDriverWait(self.driver, 120)
+        # 2. Se falhou, tenta driver local na mesma pasta do script
+        if not service:
+            local_driver = os.path.join(os.getcwd(), "msedgedriver.exe")
+            if os.path.exists(local_driver):
+                self.registrar_log(f"Tentando driver local em: {local_driver}")
+                service = EdgeService(executable_path=local_driver)
+            else:
+                self.registrar_log(f"Driver local não encontrado em: {local_driver}")
 
-            wait.until(EC.presence_of_element_located((
-                By.CSS_SELECTOR,
-                "[role='grid'], #O365_MainLink_Me, #O365_HeaderLeftRegion, #spCommandBar"
-            )))
+        # 3. Tenta driver fixo (fallback antigo)
+        if not service and os.path.exists(CAMINHO_DRIVER_FIXO):
+             self.registrar_log(f"Tentando driver fixo (fallback) em: {CAMINHO_DRIVER_FIXO}")
+             service = EdgeService(executable_path=CAMINHO_DRIVER_FIXO)
 
-            self.registrar_log("Sessão autenticada detectada.")
-        except Exception as e:
-            self.registrar_log(f"Erro no navegador: {e}")
-            # Fallback para driver fixo se necessário? Não, o erro era versão incompatível.
-            if os.path.exists(CAMINHO_DRIVER_FIXO):
-                self.registrar_log(f"Tentando driver fixo em: {CAMINHO_DRIVER_FIXO}")
-                try:
-                    service = EdgeService(executable_path=CAMINHO_DRIVER_FIXO)
-                    self.driver = webdriver.Edge(service=service, options=edge_options)
-                except Exception as e2:
-                    self.registrar_log(f"Falha também com driver fixo: {e2}")
+        # 4. Inicializa o WebDriver
+        if service:
+            try:
+                self.driver = webdriver.Edge(service=service, options=edge_options)
+                self.driver.get(URL_LOGIN_SEATRIUM)
+
+                self.registrar_log("Aguardando login na Seatrium...")
+                wait = WebDriverWait(self.driver, 120)
+
+                wait.until(EC.presence_of_element_located((
+                    By.CSS_SELECTOR,
+                    "[role='grid'], #O365_MainLink_Me, #O365_HeaderLeftRegion, #spCommandBar"
+                )))
+
+                self.registrar_log("Sessão autenticada detectada.")
+                return # Sucesso
+            except Exception as e_driver:
+                self.registrar_log(f"ERRO ao iniciar navegador: {e_driver}")
+                # Verifica se é erro de versão
+                if "session not created" in str(e_driver) and "This version of Microsoft Edge WebDriver only supports" in str(e_driver):
+                    print("\n" + "="*80)
+                    print("ERRO CRÍTICO DE VERSÃO DO DRIVER")
+                    print("="*80)
+                    print("O Selenium precisa de um arquivo 'msedgedriver.exe' que corresponda à versão do seu Edge.")
+                    print("O Edge instalado está na versão 145, mas o driver encontrado é antigo (v143).")
+                    print("\nSOLUÇÃO MANUAL:")
+                    print("1. Baixe o driver correto (v145.0.3800.58) neste link:")
+                    print("   https://msedgedriver.azureedge.net/145.0.3800.58/edgedriver_win64.zip")
+                    print(f"2. Extraia o arquivo 'msedgedriver.exe' para a pasta deste script:")
+                    print(f"   {os.getcwd()}")
+                    print("="*80 + "\n")
+                    self.registrar_log("Encerrando execução por incompatibilidade de driver.")
+                    sys.exit(1)
+        else:
+            self.registrar_log("ERRO FATAL: Nenhum driver encontrado e o download automático falhou.")
+            print("\n" + "="*80)
+            print("COMO RESOLVER O PROBLEMA DO DRIVER:")
+            print("="*80)
+            print("Devido a bloqueios de rede, o download automático do driver falhou.")
+            print("O Selenium NÃO consegue usar o Edge sem o 'msedgedriver.exe' correto.")
+            print("\nPor favor, faça o download manual:")
+            print("1. Acesse: https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/")
+            print("2. Baixe a versão correspondente ao seu Edge (v145.X.X.X).")
+            print(f"3. Coloque o 'msedgedriver.exe' na pasta: {os.getcwd()}")
+            print("="*80 + "\n")
 
     def extrair_dados(self):
         self.log_sessao = []
